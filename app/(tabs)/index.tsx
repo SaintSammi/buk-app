@@ -1,98 +1,218 @@
+import { useMemo } from 'react';
+import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import * as DocumentPicker from 'expo-document-picker';
+import { useRouter } from 'expo-router';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
+import {
+  Alert,
+  FlatList,
+  Pressable,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+type Book = {
+  id: string;
+  title: string;
+  author: string;
+  coverUri: string;
+};
+
+const BOOKS: Book[] = [
+  {
+    id: '1',
+    title: 'Pride and Prejudice',
+    author: 'Jane Austen',
+    coverUri: 'https://covers.openlibrary.org/b/id/8231856-L.jpg',
+  },
+  {
+    id: '2',
+    title: "Alice's Adventures in Wonderland",
+    author: 'Lewis Carroll',
+    coverUri: 'https://covers.openlibrary.org/b/id/8225631-L.jpg',
+  },
+  {
+    id: '3',
+    title: 'Frankenstein',
+    author: 'Mary Shelley',
+    coverUri: 'https://covers.openlibrary.org/b/id/7222246-L.jpg',
+  },
+  {
+    id: '4',
+    title: 'Moby-Dick',
+    author: 'Herman Melville',
+    coverUri: 'https://covers.openlibrary.org/b/id/5551656-L.jpg',
+  },
+  {
+    id: '5',
+    title: 'The Adventures of Sherlock Holmes',
+    author: 'Sir Arthur Conan Doyle',
+    coverUri: 'https://covers.openlibrary.org/b/id/8228691-L.jpg',
+  },
+];
 
 export default function HomeScreen() {
-  return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+  const router = useRouter();
+  const tabBarHeight = useBottomTabBarHeight();
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+  const listBottomPadding = useMemo(() => tabBarHeight + 96, [tabBarHeight]);
+  const addButtonBottom = useMemo(() => tabBarHeight + 16, [tabBarHeight]);
+
+  const openBook = (book: Book) => {
+    router.push({
+      pathname: '/reader',
+      params: { title: book.title, author: book.author },
+    });
+  };
+
+  const handleAddBook = async () => {
+    const result = await DocumentPicker.getDocumentAsync({
+      copyToCacheDirectory: true,
+      multiple: false,
+      type: ['application/epub+zip', 'application/pdf', 'text/plain'],
+    });
+
+    if (result.canceled) {
+      return;
+    }
+
+    const selectedFile = result.assets[0];
+
+    router.push({
+      pathname: '/reader',
+      params: { title: selectedFile.name, fileUri: selectedFile.uri },
+    });
+  };
+
+  const renderBookCard = ({ item }: { item: Book }) => (
+    <Pressable style={styles.card} onPress={() => openBook(item)}>
+      <Image source={{ uri: item.coverUri }} style={styles.cover} contentFit="cover" transition={120} />
+      <View style={styles.textWrap}>
+        <Text style={styles.title} numberOfLines={2}>
+          {item.title}
+        </Text>
+        <Text style={styles.author} numberOfLines={1}>
+          {item.author}
+        </Text>
+      </View>
+    </Pressable>
+  );
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.headerRow}>
+        <Pressable
+          onPress={() => Alert.alert('Menu', 'Menu action can be connected here.')}
+          hitSlop={10}
+          style={styles.menuButton}>
+          <Feather name="menu" size={24} color="#F1F1F1" />
+        </Pressable>
+        <Text style={styles.headerTitle}>My library</Text>
+      </View>
+
+      <FlatList
+        contentContainerStyle={[styles.listContent, { paddingBottom: listBottomPadding }]}
+        data={BOOKS}
+        keyExtractor={(item) => item.id}
+        renderItem={renderBookCard}
+        showsVerticalScrollIndicator={false}
+      />
+
+      <Pressable style={[styles.addButton, { bottom: addButtonBottom }]} onPress={handleAddBook}>
+        <Text style={styles.addButtonText}>+  Add Book</Text>
+      </Pressable>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#0F0F0F',
+  },
+  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 18,
+    gap: 14,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  menuButton: {
+    padding: 2,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
+  headerTitle: {
+    color: '#F5F5F5',
+    fontSize: 48,
+    fontStyle: 'italic',
+    fontWeight: '500',
+    lineHeight: 52,
+  },
+  listContent: {
+    paddingHorizontal: 20,
+    gap: 14,
+  },
+  card: {
+    backgroundColor: '#1A1A1A',
+    borderRadius: 8,
+    minHeight: 98,
+    flexDirection: 'row',
+    alignItems: 'center',
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOpacity: 0.32,
+    shadowRadius: 8,
+    shadowOffset: {
+      width: 0,
+      height: 3,
+    },
+    elevation: 3,
+  },
+  cover: {
+    width: 86,
+    height: '100%',
+  },
+  textWrap: {
+    flex: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    justifyContent: 'center',
+  },
+  title: {
+    color: '#F2F2F2',
+    fontSize: 22,
+    lineHeight: 26,
+    fontWeight: '500',
+  },
+  author: {
+    color: '#B8B8B8',
+    fontSize: 18,
+    lineHeight: 22,
+    marginTop: 6,
+  },
+  addButton: {
     position: 'absolute',
+    alignSelf: 'center',
+    backgroundColor: '#1E1E1E',
+    paddingHorizontal: 26,
+    paddingVertical: 12,
+    borderRadius: 999,
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 10,
+    shadowOffset: {
+      width: 0,
+      height: 3,
+    },
+    elevation: 4,
+  },
+  addButtonText: {
+    color: '#FAFAFA',
+    fontSize: 24,
+    lineHeight: 28,
+    fontWeight: '600',
   },
 });
