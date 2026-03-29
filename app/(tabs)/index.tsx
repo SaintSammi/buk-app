@@ -1,18 +1,16 @@
-import { useMemo } from 'react';
 import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import * as DocumentPicker from 'expo-document-picker';
 import { useRouter } from 'expo-router';
-import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import {
   Alert,
   FlatList,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 type Book = {
   id: string;
@@ -56,10 +54,6 @@ const BOOKS: Book[] = [
 
 export default function HomeScreen() {
   const router = useRouter();
-  const tabBarHeight = useBottomTabBarHeight();
-
-  const listBottomPadding = useMemo(() => tabBarHeight + 96, [tabBarHeight]);
-  const addButtonBottom = useMemo(() => tabBarHeight + 16, [tabBarHeight]);
 
   const openBook = (book: Book) => {
     router.push({
@@ -103,27 +97,38 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.safeArea}>
-      <View style={styles.headerRow}>
-        <Pressable
-          onPress={() => Alert.alert('Menu', 'Menu action can be connected here.')}
-          hitSlop={10}
-          style={styles.menuButton}>
-          <Feather name="menu" size={24} color="#F1F1F1" />
-        </Pressable>
-        <Text style={styles.headerTitle}>My library</Text>
+      <View style={styles.content}>
+        <View style={styles.headerRow}>
+          <Pressable
+            onPress={() => Alert.alert('Menu', 'Menu action can be connected here.')}
+            hitSlop={10}
+            style={styles.menuButton}>
+            <Feather name="menu" size={24} color="#0B0B0B" />
+          </Pressable>
+          <View style={styles.headerTitleWrap}>
+            <Text style={styles.headerTitle}>My Library</Text>
+          </View>
+        </View>
+
+        <FlatList
+          contentContainerStyle={styles.listContent}
+          data={BOOKS}
+          keyExtractor={(item) => item.id}
+          renderItem={renderBookCard}
+          showsVerticalScrollIndicator={false}
+        />
       </View>
 
-      <FlatList
-        contentContainerStyle={[styles.listContent, { paddingBottom: listBottomPadding }]}
-        data={BOOKS}
-        keyExtractor={(item) => item.id}
-        renderItem={renderBookCard}
-        showsVerticalScrollIndicator={false}
-      />
-
-      <Pressable style={[styles.addButton, { bottom: addButtonBottom }]} onPress={handleAddBook}>
-        <Text style={styles.addButtonText}>+  Add Book</Text>
-      </Pressable>
+      <View pointerEvents="box-none" style={styles.bottomBlurFrame}>
+        <View style={styles.bottomInner}>
+          <Pressable style={styles.addButton} onPress={handleAddBook}>
+            <View style={styles.addButtonContent}>
+              <Text style={styles.addButtonIcon}>+</Text>
+              <Text style={styles.addButtonText}>Add Book</Text>
+            </View>
+          </Pressable>
+        </View>
+      </View>
     </SafeAreaView>
   );
 }
@@ -131,88 +136,108 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#0F0F0F',
+    backgroundColor: '#F2F2F2',
+  },
+  content: {
+    flex: 1,
+    marginTop: 32,
   },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 18,
-    gap: 14,
+    marginHorizontal: 24,
+    marginBottom: 24,
   },
   menuButton: {
-    padding: 2,
+    marginRight: 14,
+  },
+  headerTitleWrap: {
+    flex: 1,
+    minWidth: 0,
   },
   headerTitle: {
-    color: '#F5F5F5',
-    fontSize: 48,
-    fontStyle: 'italic',
-    fontWeight: '500',
-    lineHeight: 52,
+    color: '#000000',
+    fontFamily: 'PlayfairDisplay_500Medium_Italic',
+    fontSize: 40,
+    lineHeight: 48,
+    includeFontPadding: false,
   },
   listContent: {
-    paddingHorizontal: 20,
-    gap: 14,
+    paddingHorizontal: 24,
+    paddingBottom: 141,
   },
   card: {
-    backgroundColor: '#1A1A1A',
+    backgroundColor: '#FFFFFF',
+    height: 106,
     borderRadius: 8,
-    minHeight: 98,
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOpacity: 0.32,
-    shadowRadius: 8,
-    shadowOffset: {
-      width: 0,
-      height: 3,
-    },
-    elevation: 3,
+    marginBottom: 24,
   },
   cover: {
-    width: 86,
-    height: '100%',
+    width: 71,
+    height: 106,
   },
   textWrap: {
     flex: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    justifyContent: 'center',
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    justifyContent: 'flex-start',
   },
   title: {
-    color: '#F2F2F2',
-    fontSize: 22,
-    lineHeight: 26,
-    fontWeight: '500',
+    color: '#000000',
+    fontFamily: 'Manrope_500Medium',
+    fontSize: 14,
+    lineHeight: 18,
   },
   author: {
-    color: '#B8B8B8',
-    fontSize: 18,
-    lineHeight: 22,
-    marginTop: 6,
+    color: '#6D6D6D',
+    fontFamily: 'Manrope_500Medium',
+    fontSize: 10,
+    lineHeight: 14,
+    marginTop: 4,
+  },
+  bottomBlurFrame: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    height: 117,
+    overflow: 'hidden',
+    backgroundColor: '#2F2F2F',
+  },
+  bottomInner: {
+    flex: 1,
+    paddingTop: 25,
+    paddingBottom: 48,
+    paddingHorizontal: 120,
+    justifyContent: 'center',
   },
   addButton: {
-    position: 'absolute',
-    alignSelf: 'center',
-    backgroundColor: '#1E1E1E',
-    paddingHorizontal: 26,
-    paddingVertical: 12,
+    backgroundColor: '#121212',
+    paddingVertical: 16,
+    paddingHorizontal: 32,
     borderRadius: 999,
-    shadowColor: '#000',
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    shadowOffset: {
-      width: 0,
-      height: 3,
-    },
-    elevation: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  addButtonIcon: {
+    color: '#FFFFFF',
+    fontFamily: 'Manrope_700Bold',
+    fontSize: 12,
+    lineHeight: 12,
+    includeFontPadding: false,
   },
   addButtonText: {
-    color: '#FAFAFA',
-    fontSize: 24,
-    lineHeight: 28,
-    fontWeight: '600',
+    color: '#FFFFFF',
+    fontFamily: 'Manrope_700Bold',
+    fontSize: 14,
+    lineHeight: 16,
   },
 });
