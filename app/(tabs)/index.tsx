@@ -22,7 +22,7 @@ type Book = {
 const BOOKS: Book[] = [
   {
     id: '1',
-    title: 'Pride and Prejudice',
+    title: 'Pride and Prejudices',
     author: 'Jane Austen',
     coverUri: 'https://covers.openlibrary.org/b/id/8231856-L.jpg',
   },
