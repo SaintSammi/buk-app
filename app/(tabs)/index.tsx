@@ -2,6 +2,8 @@ import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import * as DocumentPicker from 'expo-document-picker';
 import { useRouter } from 'expo-router';
+import { useState } from 'react';
+import PdfThumbnail from '@/components/pdf-thumbnail';
 import {
   Alert,
   FlatList,
@@ -16,10 +18,14 @@ type Book = {
   id: string;
   title: string;
   author: string;
-  coverUri: string;
+  coverUri?: string;
+  fileUri?: string;
+  sourceType?: 'pdf' | 'other';
 };
 
-const BOOKS: Book[] = [
+const DEFAULT_COVER_URI = 'https://covers.openlibrary.org/b/id/8231856-L.jpg';
+
+const defaultBooks: Book[] = [
   {
     id: '1',
     title: 'Pride and Prejudices',
@@ -52,13 +58,27 @@ const BOOKS: Book[] = [
   },
 ];
 
+function isPdfAsset(asset: { name?: string; mimeType?: string; type?: string } | undefined) {
+  const name = asset?.name?.toLowerCase() ?? '';
+  const mimeType = asset?.mimeType ?? asset?.type ?? '';
+  return name.endsWith('.pdf') || String(mimeType).toLowerCase().includes('pdf');
+}
+
 export default function HomeScreen() {
   const router = useRouter();
+  const [books, setBooks] = useState<Book[]>(defaultBooks);
 
   const openBook = (book: Book) => {
+    // Move the last opened book to the top.
+    setBooks((prev) => {
+      const existing = prev.find((b) => b.id === book.id);
+      if (!existing) return prev;
+      return [existing, ...prev.filter((b) => b.id !== existing.id)];
+    });
+
     router.push({
       pathname: '/reader',
-      params: { title: book.title, author: book.author },
+      params: { title: book.title, author: book.author || undefined, fileUri: book.fileUri },
     });
   };
 
@@ -73,24 +93,54 @@ export default function HomeScreen() {
       return;
     }
 
-    const selectedFile = result.assets[0];
+    const selectedFile = result.assets?.[0];
+    if (!selectedFile) return;
+
+    const selectedIsPdf = isPdfAsset(selectedFile as unknown as {
+      name?: string;
+      mimeType?: string;
+      type?: string;
+    });
+
+    const newBook: Book = {
+      id: `${Date.now()}`,
+      title: selectedFile.name,
+      author: '',
+      fileUri: selectedFile.uri,
+      sourceType: selectedIsPdf ? 'pdf' : 'other',
+      coverUri: selectedIsPdf ? undefined : DEFAULT_COVER_URI,
+    };
+
+    // Prepend so newest books show at the top.
+    setBooks((prev) => [newBook, ...prev]);
 
     router.push({
       pathname: '/reader',
-      params: { title: selectedFile.name, fileUri: selectedFile.uri },
+      params: { title: newBook.title, author: undefined, fileUri: newBook.fileUri },
     });
   };
 
   const renderBookCard = ({ item }: { item: Book }) => (
     <Pressable style={styles.card} onPress={() => openBook(item)}>
-      <Image source={{ uri: item.coverUri }} style={styles.cover} contentFit="cover" transition={120} />
+      {item.sourceType === 'pdf' && item.fileUri ? (
+        <PdfThumbnail uri={item.fileUri} style={styles.cover} />
+      ) : (
+        <Image
+          source={{ uri: item.coverUri ?? DEFAULT_COVER_URI }}
+          style={styles.cover}
+          contentFit="cover"
+          transition={120}
+        />
+      )}
       <View style={styles.textWrap}>
         <Text style={styles.title} numberOfLines={2}>
           {item.title}
         </Text>
-        <Text style={styles.author} numberOfLines={1}>
-          {item.author}
-        </Text>
+        {!!item.author && (
+          <Text style={styles.author} numberOfLines={1}>
+            {item.author}
+          </Text>
+        )}
       </View>
     </Pressable>
   );
@@ -112,7 +162,7 @@ export default function HomeScreen() {
 
         <FlatList
           contentContainerStyle={styles.listContent}
-          data={BOOKS}
+          data={books}
           keyExtractor={(item) => item.id}
           renderItem={renderBookCard}
           showsVerticalScrollIndicator={false}
