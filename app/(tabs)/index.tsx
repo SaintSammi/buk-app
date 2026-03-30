@@ -61,7 +61,16 @@ const defaultBooks: Book[] = [
 function isPdfAsset(asset: { name?: string; mimeType?: string; type?: string } | undefined) {
   const name = asset?.name?.toLowerCase() ?? '';
   const mimeType = asset?.mimeType ?? asset?.type ?? '';
-  return name.endsWith('.pdf') || String(mimeType).toLowerCase().includes('pdf');
+  const uri = (asset as any)?.uri?.toLowerCase?.() ?? '';
+  return name.endsWith('.pdf') || String(mimeType).toLowerCase().includes('pdf') || uri.includes('.pdf');
+}
+
+function cleanFileNameToTitle(fileName: string) {
+  const withoutExt = fileName.replace(/\.[^/.]+$/, '');
+  return withoutExt
+    .replace(/[_\-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 export default function HomeScreen() {
@@ -76,8 +85,11 @@ export default function HomeScreen() {
       return [existing, ...prev.filter((b) => b.id !== existing.id)];
     });
 
+    const fileUri = book.fileUri?.toLowerCase() ?? '';
+    const pathname =
+      book.sourceType === 'pdf' || fileUri.includes('.pdf') ? '/pdf-reader' : '/reader';
     router.push({
-      pathname: '/reader',
+      pathname,
       params: { title: book.title, author: book.author || undefined, fileUri: book.fileUri },
     });
   };
@@ -85,7 +97,7 @@ export default function HomeScreen() {
   const handleAddBook = async () => {
     const result = await DocumentPicker.getDocumentAsync({
       copyToCacheDirectory: true,
-      multiple: false,
+      multiple: true,
       type: ['application/epub+zip', 'application/pdf', 'text/plain'],
     });
 
@@ -93,31 +105,32 @@ export default function HomeScreen() {
       return;
     }
 
-    const selectedFile = result.assets?.[0];
-    if (!selectedFile) return;
+    const assets = result.assets ?? [];
+    if (!assets.length) return;
 
-    const selectedIsPdf = isPdfAsset(selectedFile as unknown as {
-      name?: string;
-      mimeType?: string;
-      type?: string;
+    const importedBooks: Book[] = assets.map((asset, idx) => {
+      const selectedIsPdf = isPdfAsset(asset as unknown as {
+        name?: string;
+        mimeType?: string;
+        type?: string;
+      });
+
+      const title = cleanFileNameToTitle(asset.name) || asset.name || 'Untitled Book';
+      const author = selectedIsPdf ? 'Unknown Author' : '';
+
+      return {
+        id: `${Date.now()}-${idx}`,
+        title,
+        author,
+        fileUri: asset.uri,
+        sourceType: selectedIsPdf ? 'pdf' : 'other',
+        coverUri: selectedIsPdf ? undefined : DEFAULT_COVER_URI,
+      };
     });
 
-    const newBook: Book = {
-      id: `${Date.now()}`,
-      title: selectedFile.name,
-      author: '',
-      fileUri: selectedFile.uri,
-      sourceType: selectedIsPdf ? 'pdf' : 'other',
-      coverUri: selectedIsPdf ? undefined : DEFAULT_COVER_URI,
-    };
-
-    // Prepend so newest books show at the top.
-    setBooks((prev) => [newBook, ...prev]);
-
-    router.push({
-      pathname: '/reader',
-      params: { title: newBook.title, author: undefined, fileUri: newBook.fileUri },
-    });
+    // MVP flow: importing should only add to library (no auto-open).
+    // Newest imports first.
+    setBooks((prev) => [...importedBooks.reverse(), ...prev]);
   };
 
   const renderBookCard = ({ item }: { item: Book }) => (
