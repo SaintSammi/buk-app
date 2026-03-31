@@ -2,7 +2,8 @@ import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import * as DocumentPicker from 'expo-document-picker';
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import PdfThumbnail from '@/components/pdf-thumbnail';
 import {
   Alert,
@@ -76,6 +77,41 @@ function cleanFileNameToTitle(fileName: string) {
 export default function HomeScreen() {
   const router = useRouter();
   const [books, setBooks] = useState<Book[]>(defaultBooks);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Load books from storage on mount
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadBooks() {
+      try {
+        const savedBooks = await AsyncStorage.getItem('books');
+        if (!cancelled) {
+          if (savedBooks) {
+            const parsed = JSON.parse(savedBooks);
+            setBooks(parsed);
+          }
+          setIsLoading(false);
+        }
+      } catch {
+        // Fallback to default books if storage fails
+        if (!cancelled) setIsLoading(false);
+      }
+    }
+
+    loadBooks();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Save books to storage whenever they change
+  useEffect(() => {
+    if (!isLoading) {
+      AsyncStorage.setItem('books', JSON.stringify(books)).catch(() => {});
+    }
+  }, [books, isLoading]);
 
   const openBook = (book: Book) => {
     // Move the last opened book to the top.
@@ -90,7 +126,12 @@ export default function HomeScreen() {
       book.sourceType === 'pdf' || fileUri.includes('.pdf') ? '/pdf-reader' : '/reader';
     router.push({
       pathname,
-      params: { title: book.title, author: book.author || undefined, fileUri: book.fileUri },
+      params: {
+        bookId: book.id,
+        title: book.title,
+        author: book.author || undefined,
+        fileUri: book.fileUri,
+      },
     });
   };
 
@@ -173,13 +214,24 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        <FlatList
-          contentContainerStyle={styles.listContent}
-          data={books}
-          keyExtractor={(item) => item.id}
-          renderItem={renderBookCard}
-          showsVerticalScrollIndicator={false}
-        />
+        {isLoading ? (
+          <View style={styles.loadingContainer}>
+            <Text style={styles.loadingText}>Loading your library...</Text>
+          </View>
+        ) : (
+          <FlatList
+            contentContainerStyle={styles.listContent}
+            data={books}
+            keyExtractor={(item) => item.id}
+            renderItem={renderBookCard}
+            showsVerticalScrollIndicator={false}
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Text style={styles.emptyText}>No books yet. Start by adding a book!</Text>
+              </View>
+            }
+          />
+        )}
       </View>
 
       <View pointerEvents="box-none" style={styles.bottomBlurFrame}>
@@ -302,5 +354,27 @@ const styles = StyleSheet.create({
     fontFamily: 'Manrope_700Bold',
     fontSize: 14,
     lineHeight: 16,
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: '#6D6D6D',
+    fontSize: 16,
+    fontFamily: 'Manrope_500Medium',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  emptyText: {
+    color: '#6D6D6D',
+    fontSize: 16,
+    fontFamily: 'Manrope_500Medium',
+    textAlign: 'center',
   },
 });
