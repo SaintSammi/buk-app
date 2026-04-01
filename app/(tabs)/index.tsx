@@ -149,7 +149,11 @@ export default function HomeScreen() {
     const assets = result.assets ?? [];
     if (!assets.length) return;
 
-    const importedBooks: Book[] = assets.map((asset, idx) => {
+    const importedBooks: Book[] = [];
+
+    // Process each asset
+    for (let idx = 0; idx < assets.length; idx++) {
+      const asset = assets[idx];
       const selectedIsPdf = isPdfAsset(asset as unknown as {
         name?: string;
         mimeType?: string;
@@ -159,23 +163,42 @@ export default function HomeScreen() {
       const title = cleanFileNameToTitle(asset.name) || asset.name || 'Untitled Book';
       const author = selectedIsPdf ? 'Unknown Author' : '';
 
-      return {
+      let fileUri = asset.uri;
+
+      importedBooks.push({
         id: `${Date.now()}-${idx}`,
         title,
         author,
-        fileUri: asset.uri,
+        fileUri,
         sourceType: selectedIsPdf ? 'pdf' : 'other',
         coverUri: selectedIsPdf ? undefined : DEFAULT_COVER_URI,
-      };
-    });
+      });
+    }
 
     // MVP flow: importing should only add to library (no auto-open).
     // Newest imports first.
     setBooks((prev) => [...importedBooks.reverse(), ...prev]);
   };
 
+  const handleDeleteBook = (book: Book) => {
+    Alert.alert(
+      'Remove Book',
+      `Remove "${book.title}" from your library?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: () => {
+            setBooks((prev) => prev.filter((b) => b.id !== book.id));
+          },
+        },
+      ]
+    );
+  };
+
   const renderBookCard = ({ item }: { item: Book }) => (
-    <Pressable style={styles.card} onPress={() => openBook(item)}>
+    <Pressable style={styles.card} onPress={() => openBook(item)} onLongPress={() => handleDeleteBook(item)}>
       {item.sourceType === 'pdf' && item.fileUri ? (
         <PdfThumbnail uri={item.fileUri} style={styles.cover} />
       ) : (
