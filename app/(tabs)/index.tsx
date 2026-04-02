@@ -1,6 +1,7 @@
 import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import * as DocumentPicker from 'expo-document-picker';
+import * as FileSystem from 'expo-file-system/legacy';
 import { useRouter } from 'expo-router';
 import { useState, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -113,7 +114,27 @@ export default function HomeScreen() {
     }
   }, [books, isLoading]);
 
-  const openBook = (book: Book) => {
+  const openBook = async (book: Book) => {
+    const uri = book.fileUri ?? '';
+    if (uri.startsWith('file://')) {
+      try {
+        const info = await FileSystem.getInfoAsync(uri);
+        if (!(info as { exists?: boolean })?.exists) {
+          Alert.alert(
+            'File Missing',
+            'This imported file is no longer available on device storage. Please remove it and add the book again.'
+          );
+          return;
+        }
+      } catch {
+        Alert.alert(
+          'File Error',
+          'Unable to access this file. Please remove it and add the book again.'
+        );
+        return;
+      }
+    }
+
     // Move the last opened book to the top.
     setBooks((prev) => {
       const existing = prev.find((b) => b.id === book.id);
@@ -151,6 +172,18 @@ export default function HomeScreen() {
 
     const importedBooks: Book[] = [];
 
+    // Ensure persistent cache directory exists
+    const persistentCacheDir = `${FileSystem.cacheDirectory}buk-books/`;
+    try {
+      const dirInfo = await FileSystem.getInfoAsync(persistentCacheDir);
+      if (!dirInfo.exists) {
+        await FileSystem.makeDirectoryAsync(persistentCacheDir, { intermediates: true });
+      }
+    } catch {
+      Alert.alert('Error', 'Failed to create storage directory');
+      return;
+    }
+
     // Process each asset
     for (let idx = 0; idx < assets.length; idx++) {
       const asset = assets[idx];
@@ -164,6 +197,21 @@ export default function HomeScreen() {
       const author = selectedIsPdf ? 'Unknown Author' : '';
 
       let fileUri = asset.uri;
+
+      // For PDFs, copy to persistent cache if it's a content:// URI
+      if (selectedIsPdf && fileUri.startsWith('content://')) {
+        try {
+          const persistentUri = `${persistentCacheDir}${Date.now()}-${idx}-${asset.name}`;
+          await FileSystem.copyAsync({
+            from: fileUri,
+            to: persistentUri,
+          });
+          fileUri = persistentUri;
+        } catch (error) {
+          console.warn(`Failed to copy PDF ${asset.name}:`, error);
+          // Fall back to original URI; might work if permissions are granted
+        }
+      }
 
       importedBooks.push({
         id: `${Date.now()}-${idx}`,

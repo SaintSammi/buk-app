@@ -3,8 +3,16 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, View, Pressable, Text, LayoutChangeEvent, Animated, PanResponder } from 'react-native';
 import { WebView } from 'react-native-webview';
 import * as FileSystem from 'expo-file-system/legacy';
+import { Image } from 'expo-image';
 import { Feather } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { usePdfImageCache } from '@/hooks/use-pdf-image-cache';
+import {
+  disposePdfDocument,
+  isPdfPageImageExtractorAvailable,
+  preparePdfDocument,
+  renderPdfPageToImage,
+} from '@/services/pdf-page-image-extractor';
 
 // Lazy load AsyncStorage to avoid errors in Expo Go
 const getAsyncStorage = () => {
@@ -16,6 +24,8 @@ const getAsyncStorage = () => {
 };
 
 export default function PdfReaderNativeScreen() {
+  type DragIntent = 'none' | 'left' | 'right';
+  type HybridState = 'idle' | 'warming' | 'ready' | 'fallback';
   const router = useRouter();
   const { title, fileUri, bookId } = useLocalSearchParams<{
     bookId?: string;
@@ -38,9 +48,31 @@ export default function PdfReaderNativeScreen() {
   const [totalPages, setTotalPages] = useState(0);
   const [pageCountReady, setPageCountReady] = useState(false);
   const [screenWidth, setScreenWidth] = useState(360);
+  const [dragIntent, setDragIntent] = useState<DragIntent>('none');
+  const [activePdfUri, setActivePdfUri] = useState<string>('');
+  const [uriReady, setUriReady] = useState(false);
+  const [hybridEnabled] = useState(true);
+  const [hybridState, setHybridState] = useState<HybridState>('idle');
+  const [hybridTargetPage, setHybridTargetPage] = useState<number | null>(null);
+  const [hybridDirection, setHybridDirection] = useState<DragIntent>('none');
+  const [hybridError, setHybridError] = useState<string>('');
+  const [extractorReady, setExtractorReady] = useState(false);
+  const [extractorBusy, setExtractorBusy] = useState(false);
+  const [extractorDocumentId, setExtractorDocumentId] = useState<string>('');
   const webViewRef = React.useRef<WebView>(null);
   const pageUpdateTimeoutRef = React.useRef<NodeJS.Timeout | number | null>(null);
+  const extractorQueueRef = React.useRef<number[]>([]);
+  const extractorInFlightPageRef = React.useRef<number | null>(null);
   const dragX = React.useRef(new Animated.Value(0)).current;
+  const isCommittingRef = React.useRef(false);
+  const {
+    cachedPages,
+    clear: clearPageImageCache,
+    getPageImage,
+    primeWindow,
+    setPageImage,
+    touch,
+  } = usePdfImageCache({ maxEntries: 6 });
   const Pdf = useMemo(() => {
     try {
       return require('react-native-pdf').default ?? require('react-native-pdf');
@@ -81,8 +113,169 @@ export default function PdfReaderNativeScreen() {
     setPageCountReady(false);
     setTotalPages(0);
     setCurrentPage(1);
+    setDragIntent('none');
+    setHybridTargetPage(null);
+    setHybridDirection('none');
+    setHybridState('idle');
+    setHybridError('');
+    setExtractorReady(false);
+    setExtractorBusy(false);
+    setExtractorDocumentId('');
+    extractorQueueRef.current = [];
+    extractorInFlightPageRef.current = null;
+    clearPageImageCache();
     dragX.setValue(0);
-  }, [resolvedFileUri, dragX]);
+  }, [resolvedFileUri, dragX, clearPageImageCache]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function setupExtractor() {
+      if (!hybridEnabled || !activePdfUri || totalPages <= 0) return;
+
+      if (!isPdfPageImageExtractorAvailable()) {
+        if (!cancelled) {
+          setExtractorReady(false);
+          setHybridState('fallback');
+          setHybridError('native_extractor_unavailable');
+        }
+        return;
+      }
+
+      try {
+        const prepared = await preparePdfDocument(activePdfUri);
+        if (cancelled) {
+          await disposePdfDocument(prepared.documentId);
+          return;
+        }
+
+        setExtractorDocumentId(prepared.documentId);
+        setExtractorReady(true);
+        setHybridError('');
+      } catch (error) {
+        if (!cancelled) {
+          setExtractorReady(false);
+          setHybridState('fallback');
+          setHybridError(error instanceof Error ? error.message : 'native_prepare_failed');
+        }
+      }
+    }
+
+    setupExtractor();
+
+    return () => {
+      cancelled = true;
+      const docId = extractorDocumentId;
+      if (docId) {
+        disposePdfDocument(docId);
+      }
+    };
+  }, [hybridEnabled, activePdfUri, totalPages, extractorDocumentId]);
+
+  useEffect(() => {
+    if (!hybridEnabled || totalPages <= 0) return;
+
+    const missingPages = primeWindow({
+      currentPage,
+      totalPages,
+      radius: 2,
+      direction: hybridDirection,
+    });
+
+    if (missingPages.length > 0) {
+      setHybridState('warming');
+      return;
+    }
+
+    setHybridState('ready');
+  }, [currentPage, totalPages, hybridDirection, hybridEnabled, primeWindow]);
+
+  useEffect(() => {
+    if (!hybridEnabled || totalPages <= 0 || dragIntent === 'none') {
+      setHybridDirection('none');
+      setHybridTargetPage(null);
+      return;
+    }
+
+    const target = dragIntent === 'left' ? currentPage + 1 : currentPage - 1;
+    const canUseTarget = target >= 1 && target <= totalPages;
+
+    setHybridDirection(dragIntent);
+    setHybridTargetPage(canUseTarget ? target : null);
+  }, [dragIntent, currentPage, totalPages, hybridEnabled]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function resolveUri() {
+      setUriReady(false);
+
+      if (!resolvedFileUri) {
+        if (!cancelled) {
+          setActivePdfUri('');
+          setUriReady(true);
+        }
+        return;
+      }
+
+      // Try both encoded and decoded file URIs to avoid ENOENT from escaped paths.
+      const decoded = (() => {
+        try {
+          return decodeURIComponent(resolvedFileUri);
+        } catch {
+          return resolvedFileUri;
+        }
+      })();
+
+      if (resolvedFileUri.startsWith('content://')) {
+        if (!cancelled) {
+          setActivePdfUri(resolvedFileUri);
+          setUriReady(true);
+        }
+        return;
+      }
+
+      const candidates = [decoded, resolvedFileUri].filter((v, i, arr) => v && arr.indexOf(v) === i);
+
+      for (const candidate of candidates) {
+        if (!candidate.startsWith('file://')) continue;
+        try {
+          const info = await FileSystem.getInfoAsync(candidate);
+          if ((info as { exists?: boolean })?.exists) {
+            if (!cancelled) {
+              setActivePdfUri(candidate);
+              setUriReady(true);
+            }
+            return;
+          }
+        } catch {
+          // Try next candidate.
+        }
+      }
+
+      if (!cancelled) {
+        setActivePdfUri(decoded);
+        setUriReady(true);
+      }
+    }
+
+    resolveUri();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [resolvedFileUri]);
+
+  useEffect(() => {
+    if (!useNativeFallback || pageCountReady) return;
+
+    const id = setTimeout(() => {
+      setPageCountReady(true);
+      setTotalPages((prev) => (prev > 0 ? prev : Math.max(1, currentPage)));
+    }, 1400);
+
+    return () => clearTimeout(id);
+  }, [useNativeFallback, pageCountReady, currentPage]);
 
   // Save progress to AsyncStorage whenever currentPage changes
   useEffect(() => {
@@ -173,17 +366,27 @@ export default function PdfReaderNativeScreen() {
       useNativeDriver: true,
       tension: 120,
       friction: 12,
-    }).start();
+    }).start(() => {
+      setDragIntent('none');
+      setHybridDirection('none');
+      setHybridTargetPage(null);
+    });
   }, [dragX]);
 
   const commitPageWithAnimatedSnap = React.useCallback((nextPage: number, direction: 1 | -1) => {
+    isCommittingRef.current = true;
     setCurrentPage(nextPage);
     dragX.setValue(-direction * screenWidth * 0.28);
     Animated.timing(dragX, {
       toValue: 0,
       duration: 170,
       useNativeDriver: true,
-    }).start();
+    }).start(() => {
+      setDragIntent('none');
+      setHybridDirection('none');
+      setHybridTargetPage(null);
+      isCommittingRef.current = false;
+    });
   }, [dragX, screenWidth]);
 
   const panResponder = React.useMemo(
@@ -194,14 +397,31 @@ export default function PdfReaderNativeScreen() {
         onMoveShouldSetPanResponder: (_evt, g) => Math.abs(g.dx) > Math.abs(g.dy) && Math.abs(g.dx) > 2,
         onMoveShouldSetPanResponderCapture: (_evt, g) => Math.abs(g.dx) > Math.abs(g.dy) && Math.abs(g.dx) > 2,
         onPanResponderGrant: () => {
+          if (isCommittingRef.current) return;
           dragX.stopAnimation();
+          setDragIntent('none');
         },
         onPanResponderTerminationRequest: () => false,
         onPanResponderMove: (_evt, g) => {
+          if (isCommittingRef.current || !pageCountReady) return;
           const clampedDx = Math.max(-screenWidth * 0.9, Math.min(screenWidth * 0.9, g.dx));
-          dragX.setValue(clampedDx);
+
+          if (dragIntent === 'none' && Math.abs(clampedDx) > 6) {
+            const intent: DragIntent = clampedDx < 0 ? 'left' : 'right';
+            setDragIntent(intent);
+          }
+
+          let resolvedDx = clampedDx;
+          if (dragIntent === 'left' && clampedDx > 0) {
+            resolvedDx = clampedDx * 0.1;
+          }
+          dragX.setValue(resolvedDx);
         },
         onPanResponderRelease: (_evt, g) => {
+          if (isCommittingRef.current) {
+            resetDrag();
+            return;
+          }
           if (!pageCountReady) {
             resetDrag();
             return;
@@ -212,6 +432,11 @@ export default function PdfReaderNativeScreen() {
           const shouldSnap = dragPercent >= 0.12 || Math.abs(velocity) >= 0.2;
 
           if (!shouldSnap || totalPages <= 0) {
+            resetDrag();
+            return;
+          }
+
+          if (dragIntent === 'none') {
             resetDrag();
             return;
           }
@@ -229,7 +454,7 @@ export default function PdfReaderNativeScreen() {
           resetDrag();
         },
       }),
-    [dragX, screenWidth, totalPages, currentPage, resetDrag, commitPageWithAnimatedSnap, pageCountReady]
+    [dragX, screenWidth, totalPages, currentPage, resetDrag, commitPageWithAnimatedSnap, pageCountReady, dragIntent]
   );
 
   useEffect(() => {
@@ -240,14 +465,111 @@ export default function PdfReaderNativeScreen() {
 
   const currentOpacity = dragX.interpolate({
     inputRange: [-screenWidth, 0, screenWidth],
-    outputRange: [0.72, 1, 0.72],
+    outputRange: [0.76, 1, 0.9],
     extrapolate: 'clamp',
   });
   const currentScale = dragX.interpolate({
     inputRange: [-screenWidth, 0, screenWidth],
-    outputRange: [0.95, 1, 0.95],
+    outputRange: [0.97, 1, 0.99],
     extrapolate: 'clamp',
   });
+
+  const currentTranslateX = dragIntent === 'left'
+    ? dragX.interpolate({
+        inputRange: [-screenWidth, 0, screenWidth],
+        outputRange: [-screenWidth, 0, screenWidth * 0.05],
+        extrapolate: 'clamp',
+      })
+    : dragX.interpolate({
+        inputRange: [-screenWidth, 0, screenWidth],
+        outputRange: [-screenWidth * 0.08, 0, 0],
+        extrapolate: 'clamp',
+      });
+
+  const behindOpacity = dragX.interpolate({
+    inputRange: [-screenWidth, 0, screenWidth],
+    outputRange: [1, 0, 1],
+    extrapolate: 'clamp',
+  });
+
+  const behindScale = dragX.interpolate({
+    inputRange: [-screenWidth, 0, screenWidth],
+    outputRange: [1, 0.98, 1],
+    extrapolate: 'clamp',
+  });
+
+  const behindTranslateX = hybridDirection === 'left'
+    ? dragX.interpolate({
+        inputRange: [-screenWidth, 0, screenWidth],
+        outputRange: [0, screenWidth * 0.18, screenWidth * 0.24],
+        extrapolate: 'clamp',
+      })
+    : dragX.interpolate({
+        inputRange: [-screenWidth, 0, screenWidth],
+        outputRange: [-screenWidth * 0.24, -screenWidth * 0.18, 0],
+        extrapolate: 'clamp',
+      });
+
+  const hybridTargetUri = hybridTargetPage ? getPageImage(hybridTargetPage) : null;
+
+  useEffect(() => {
+    if (!hybridEnabled || !extractorReady || extractorBusy || totalPages <= 0 || !extractorDocumentId) return;
+
+    const pagesNeeded = primeWindow({
+      currentPage,
+      totalPages,
+      radius: 2,
+      direction: hybridDirection,
+    });
+
+    if (pagesNeeded.length === 0) return;
+
+    const inFlight = extractorInFlightPageRef.current;
+    const queueSet = new Set(extractorQueueRef.current);
+    const incoming = pagesNeeded.filter((page) => page !== inFlight && !queueSet.has(page));
+    if (incoming.length > 0) {
+      extractorQueueRef.current = [...extractorQueueRef.current, ...incoming];
+    }
+
+    if (extractorQueueRef.current.length === 0) return;
+
+    const page = extractorQueueRef.current.shift();
+    if (!page) return;
+
+    extractorInFlightPageRef.current = page;
+    setExtractorBusy(true);
+
+    renderPdfPageToImage({
+      documentId: extractorDocumentId,
+      page,
+      width: Math.floor(screenWidth),
+      height: Math.floor(screenWidth * 1.6),
+      quality: 90,
+    })
+      .then((uri) => {
+        setPageImage(page, uri);
+        touch(page);
+      })
+      .catch((error) => {
+        setHybridState('fallback');
+        setHybridError(error instanceof Error ? error.message : 'native_render_failed');
+      })
+      .finally(() => {
+        setExtractorBusy(false);
+        extractorInFlightPageRef.current = null;
+      });
+  }, [
+    hybridEnabled,
+    extractorReady,
+    extractorBusy,
+    extractorDocumentId,
+    currentPage,
+    totalPages,
+    hybridDirection,
+    screenWidth,
+    primeWindow,
+    cachedPages,
+  ]);
 
   const html = useMemo(() => {
     const safeUri = encodeURI(resolvedFileUri).replace(/"/g, '&quot;');
@@ -696,7 +1018,7 @@ export default function PdfReaderNativeScreen() {
     `;
   }, [resolvedFileUri, base64, base64State, pdfJsCode]);
 
-  if (!resolvedFileUri) {
+  if (!resolvedFileUri || !uriReady) {
     return (
       <View style={styles.container}>
         <ActivityIndicator color="#6D6D6D" />
@@ -743,7 +1065,7 @@ export default function PdfReaderNativeScreen() {
               <View style={styles.pageLayer}>
                 <Pdf
                   key={`native-metadata-${resolvedFileUri}`}
-                  source={{ uri: resolvedFileUri, cache: false }}
+                  source={{ uri: activePdfUri, cache: false }}
                   style={styles.web}
                   page={1}
                   horizontal={false}
@@ -758,32 +1080,59 @@ export default function PdfReaderNativeScreen() {
                     }
                     setPageCountReady(true);
                   }}
+                  onError={(err: unknown) => {
+                    console.log('[PdfReaderNative] metadata load failed:', err);
+                    setPageCountReady(true);
+                    setTotalPages((prev) => (prev > 0 ? prev : 0));
+                  }}
                   renderActivityIndicator={() => <ActivityIndicator size="small" color="#6D6D6D" />}
                 />
               </View>
             ) : (
-              <Animated.View
-                style={[
-                  styles.pageLayer,
-                  {
-                    opacity: currentOpacity,
-                    transform: [{ translateX: dragX }, { scale: currentScale }],
-                  },
-                ]}
-              >
-                <Pdf
-                  key={`native-current-${resolvedFileUri}-${currentPage}`}
-                  source={{ uri: resolvedFileUri, cache: false }}
-                  style={styles.web}
-                  page={currentPage}
-                  horizontal={false}
-                  enablePaging={false}
-                  scrollEnabled={false}
-                  singlePage={true}
-                  spacing={0}
-                  renderActivityIndicator={() => <ActivityIndicator size="small" color="#6D6D6D" />}
-                />
-              </Animated.View>
+              <>
+                {hybridEnabled && hybridTargetUri && hybridTargetPage ? (
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[
+                      styles.pageLayer,
+                      {
+                        opacity: behindOpacity,
+                        transform: [{ translateX: behindTranslateX }, { scale: behindScale }],
+                      },
+                    ]}
+                  >
+                    <Image source={{ uri: hybridTargetUri }} style={styles.web} contentFit="contain" />
+                  </Animated.View>
+                ) : null}
+
+                <Animated.View
+                  style={[
+                    styles.pageLayer,
+                    {
+                      opacity: currentOpacity,
+                      transform: [{ translateX: currentTranslateX }, { scale: currentScale }],
+                    },
+                  ]}
+                >
+                  <Pdf
+                    key={`native-current-${resolvedFileUri}-${currentPage}`}
+                    source={{ uri: activePdfUri, cache: false }}
+                    style={styles.web}
+                    page={Math.max(1, currentPage)}
+                    horizontal={false}
+                    enablePaging={false}
+                    scrollEnabled={false}
+                    singlePage={true}
+                    spacing={0}
+                    onError={(err: unknown) => {
+                      console.log('[PdfReaderNative] page render failed:', err);
+                      setHybridState('fallback');
+                      setHybridError('live_page_render_failed');
+                    }}
+                    renderActivityIndicator={() => <ActivityIndicator size="small" color="#6D6D6D" />}
+                  />
+                </Animated.View>
+              </>
             )}
 
             <Animated.View style={styles.gestureOverlay} {...panResponder.panHandlers} />
@@ -830,6 +1179,11 @@ export default function PdfReaderNativeScreen() {
           <Text style={styles.pageIndicator}>
             Page {currentPage} {totalPages > 0 ? `of ${totalPages}` : ''}
           </Text>
+          {hybridEnabled ? (
+            <Text style={styles.hybridIndicator}>
+              Hybrid {hybridState}{hybridError ? ` (${hybridError})` : ''}
+            </Text>
+          ) : null}
         </View>
       )}
     </SafeAreaView>
@@ -902,6 +1256,12 @@ const styles = StyleSheet.create({
   pageIndicator: {
     color: '#FFF',
     fontSize: 14,
+    fontWeight: '500',
+  },
+  hybridIndicator: {
+    marginTop: 4,
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 11,
     fontWeight: '500',
   },
 });

@@ -9,6 +9,28 @@ export default function PdfThumbnail({
   uri: string;
   style?: StyleProp<ViewStyle>;
 }) {
+  const [failed, setFailed] = React.useState(false);
+  const resolvedUri = React.useMemo(() => {
+    try {
+      return decodeURIComponent(uri);
+    } catch {
+      return uri;
+    }
+  }, [uri]);
+
+  if (failed) {
+    return (
+      <View
+        style={[
+          style,
+          { backgroundColor: '#EDEDED' },
+          { alignItems: 'center', justifyContent: 'center' },
+        ]}>
+        <Text style={{ color: '#6D6D6D', fontWeight: '700' }}>PDF</Text>
+      </View>
+    );
+  }
+
   // For custom/dev builds where native deps exist, render page 1.
   let Pdf: any;
   try {
@@ -27,16 +49,24 @@ export default function PdfThumbnail({
   }
 
   return (
-    <Pdf
-      source={{ uri, cache: true }}
-      page={1}
-      singlePage
-      scale={1}
-      style={style}
-      renderActivityIndicator={() => (
-        <ActivityIndicator size="small" color="#6D6D6D" />
-      )}
-    />
+    <View
+      style={[
+        style,
+        { backgroundColor: '#EFEFEF' },
+        { overflow: 'hidden' },
+      ]}>
+      <Pdf
+        source={{ uri: resolvedUri, cache: false }}
+        page={1}
+        singlePage
+        scale={1}
+        style={{ flex: 1, backgroundColor: '#EFEFEF' }}
+        onError={() => setFailed(true)}
+        renderActivityIndicator={() => (
+          <ActivityIndicator size="small" color="#6D6D6D" />
+        )}
+      />
+    </View>
   );
 }
 
