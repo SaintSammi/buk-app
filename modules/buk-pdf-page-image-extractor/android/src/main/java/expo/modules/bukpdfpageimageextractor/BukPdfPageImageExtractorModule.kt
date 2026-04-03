@@ -3,7 +3,6 @@ package expo.modules.bukpdfpageimageextractor
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
-import android.graphics.Matrix
 import android.graphics.Rect
 import android.graphics.pdf.PdfRenderer
 import android.net.Uri
@@ -82,10 +81,8 @@ class BukPdfPageImageExtractorModule : Module() {
         val offsetY = (outputHeight - renderHeight) / 2
 
         val renderBitmap = Bitmap.createBitmap(renderWidth, renderHeight, Bitmap.Config.ARGB_8888)
-        val renderRect = Rect(0, 0, renderWidth, renderHeight)
-        val matrix = Matrix()
 
-        pdfPage.render(renderBitmap, renderRect, matrix, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+        pdfPage.render(renderBitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
         canvas.drawBitmap(renderBitmap, offsetX.toFloat(), offsetY.toFloat(), null)
         renderBitmap.recycle()
       } finally {

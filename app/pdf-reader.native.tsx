@@ -25,7 +25,6 @@ const getAsyncStorage = () => {
 
 export default function PdfReaderNativeScreen() {
   type DragIntent = 'none' | 'left' | 'right';
-  type HybridState = 'idle' | 'warming' | 'ready' | 'fallback';
   const router = useRouter();
   const { title, fileUri, bookId } = useLocalSearchParams<{
     bookId?: string;
@@ -52,10 +51,9 @@ export default function PdfReaderNativeScreen() {
   const [activePdfUri, setActivePdfUri] = useState<string>('');
   const [uriReady, setUriReady] = useState(false);
   const [hybridEnabled] = useState(true);
-  const [hybridState, setHybridState] = useState<HybridState>('idle');
-  const [hybridTargetPage, setHybridTargetPage] = useState<number | null>(null);
-  const [hybridDirection, setHybridDirection] = useState<DragIntent>('none');
-  const [hybridError, setHybridError] = useState<string>('');
+  const [settlingTargetPage, setSettlingTargetPage] = useState<number | null>(null);
+  const [settlingTargetUri, setSettlingTargetUri] = useState<string | null>(null);
+  const [currentPageReady, setCurrentPageReady] = useState(true);
   const [extractorReady, setExtractorReady] = useState(false);
   const [extractorBusy, setExtractorBusy] = useState(false);
   const [extractorDocumentId, setExtractorDocumentId] = useState<string>('');
@@ -64,6 +62,7 @@ export default function PdfReaderNativeScreen() {
   const extractorQueueRef = React.useRef<number[]>([]);
   const extractorInFlightPageRef = React.useRef<number | null>(null);
   const dragX = React.useRef(new Animated.Value(0)).current;
+  const settlingOverlayOpacity = React.useRef(new Animated.Value(1)).current;
   const isCommittingRef = React.useRef(false);
   const {
     cachedPages,
@@ -114,10 +113,9 @@ export default function PdfReaderNativeScreen() {
     setTotalPages(0);
     setCurrentPage(1);
     setDragIntent('none');
-    setHybridTargetPage(null);
-    setHybridDirection('none');
-    setHybridState('idle');
-    setHybridError('');
+    setSettlingTargetPage(null);
+    setSettlingTargetUri(null);
+    setCurrentPageReady(true);
     setExtractorReady(false);
     setExtractorBusy(false);
     setExtractorDocumentId('');
@@ -125,7 +123,8 @@ export default function PdfReaderNativeScreen() {
     extractorInFlightPageRef.current = null;
     clearPageImageCache();
     dragX.setValue(0);
-  }, [resolvedFileUri, dragX, clearPageImageCache]);
+    settlingOverlayOpacity.setValue(1);
+  }, [resolvedFileUri, dragX, clearPageImageCache, settlingOverlayOpacity]);
 
   useEffect(() => {
     let cancelled = false;
@@ -136,8 +135,6 @@ export default function PdfReaderNativeScreen() {
       if (!isPdfPageImageExtractorAvailable()) {
         if (!cancelled) {
           setExtractorReady(false);
-          setHybridState('fallback');
-          setHybridError('native_extractor_unavailable');
         }
         return;
       }
@@ -151,12 +148,9 @@ export default function PdfReaderNativeScreen() {
 
         setExtractorDocumentId(prepared.documentId);
         setExtractorReady(true);
-        setHybridError('');
-      } catch (error) {
+      } catch {
         if (!cancelled) {
           setExtractorReady(false);
-          setHybridState('fallback');
-          setHybridError(error instanceof Error ? error.message : 'native_prepare_failed');
         }
       }
     }
@@ -171,38 +165,6 @@ export default function PdfReaderNativeScreen() {
       }
     };
   }, [hybridEnabled, activePdfUri, totalPages, extractorDocumentId]);
-
-  useEffect(() => {
-    if (!hybridEnabled || totalPages <= 0) return;
-
-    const missingPages = primeWindow({
-      currentPage,
-      totalPages,
-      radius: 2,
-      direction: hybridDirection,
-    });
-
-    if (missingPages.length > 0) {
-      setHybridState('warming');
-      return;
-    }
-
-    setHybridState('ready');
-  }, [currentPage, totalPages, hybridDirection, hybridEnabled, primeWindow]);
-
-  useEffect(() => {
-    if (!hybridEnabled || totalPages <= 0 || dragIntent === 'none') {
-      setHybridDirection('none');
-      setHybridTargetPage(null);
-      return;
-    }
-
-    const target = dragIntent === 'left' ? currentPage + 1 : currentPage - 1;
-    const canUseTarget = target >= 1 && target <= totalPages;
-
-    setHybridDirection(dragIntent);
-    setHybridTargetPage(canUseTarget ? target : null);
-  }, [dragIntent, currentPage, totalPages, hybridEnabled]);
 
   useEffect(() => {
     let cancelled = false;
@@ -368,26 +330,51 @@ export default function PdfReaderNativeScreen() {
       friction: 12,
     }).start(() => {
       setDragIntent('none');
-      setHybridDirection('none');
-      setHybridTargetPage(null);
     });
   }, [dragX]);
 
+  const currentPageImageUri = getPageImage(currentPage);
+  const nextPageNumber = currentPage + 1;
+  const nextPageImageUri = nextPageNumber <= totalPages ? getPageImage(nextPageNumber) : null;
+  const prevPageNumber = currentPage - 1;
+  const prevPageImageUri = prevPageNumber >= 1 ? getPageImage(prevPageNumber) : null;
+  const canAdvanceForward = pageCountReady && totalPages > 0 && currentPage < totalPages;
+  const canAnimateForwardSwipe = canAdvanceForward && !!currentPageImageUri && !!nextPageImageUri;
+  const canAnimateBackwardSwipe = pageCountReady && currentPage > 1 && !!currentPageImageUri && !!prevPageImageUri;
+
   const commitPageWithAnimatedSnap = React.useCallback((nextPage: number, direction: 1 | -1) => {
     isCommittingRef.current = true;
-    setCurrentPage(nextPage);
-    dragX.setValue(-direction * screenWidth * 0.28);
+    const nextTargetUri = getPageImage(nextPage);
+
+    if (!nextTargetUri) {
+      setSettlingTargetPage(null);
+      setSettlingTargetUri(null);
+      setCurrentPageReady(true);
+      setCurrentPage(nextPage);
+      dragX.setValue(0);
+      setDragIntent('none');
+      settlingOverlayOpacity.setValue(1);
+      isCommittingRef.current = false;
+      return;
+    }
+
+    setSettlingTargetPage(nextPage);
+    setSettlingTargetUri(nextTargetUri);
+    setCurrentPageReady(false);
+    settlingOverlayOpacity.setValue(1);
+
+    const exitX = direction > 0 ? screenWidth : -screenWidth;
+
     Animated.timing(dragX, {
-      toValue: 0,
-      duration: 170,
+      toValue: exitX,
+      duration: 180,
       useNativeDriver: true,
     }).start(() => {
+      setCurrentPage(nextPage);
       setDragIntent('none');
-      setHybridDirection('none');
-      setHybridTargetPage(null);
       isCommittingRef.current = false;
     });
-  }, [dragX, screenWidth]);
+  }, [dragX, getPageImage, screenWidth, settlingOverlayOpacity]);
 
   const panResponder = React.useMemo(
     () =>
@@ -397,8 +384,9 @@ export default function PdfReaderNativeScreen() {
         onMoveShouldSetPanResponder: (_evt, g) => Math.abs(g.dx) > Math.abs(g.dy) && Math.abs(g.dx) > 2,
         onMoveShouldSetPanResponderCapture: (_evt, g) => Math.abs(g.dx) > Math.abs(g.dy) && Math.abs(g.dx) > 2,
         onPanResponderGrant: () => {
-          if (isCommittingRef.current) return;
+          if (isCommittingRef.current || !currentPageReady) return;
           dragX.stopAnimation();
+          dragX.setValue(0);
           setDragIntent('none');
         },
         onPanResponderTerminationRequest: () => false,
@@ -406,55 +394,59 @@ export default function PdfReaderNativeScreen() {
           if (isCommittingRef.current || !pageCountReady) return;
           const clampedDx = Math.max(-screenWidth * 0.9, Math.min(screenWidth * 0.9, g.dx));
 
-          if (dragIntent === 'none' && Math.abs(clampedDx) > 6) {
-            const intent: DragIntent = clampedDx < 0 ? 'left' : 'right';
-            setDragIntent(intent);
+          if (clampedDx > 0) {
+            if (!canAnimateBackwardSwipe) {
+              dragX.setValue(0);
+              if (dragIntent !== 'none') setDragIntent('none');
+              return;
+            }
+            if (dragIntent === 'none' && clampedDx > 6) setDragIntent('right');
+            dragX.setValue(clampedDx);
+            return;
           }
 
-          let resolvedDx = clampedDx;
-          if (dragIntent === 'left' && clampedDx > 0) {
-            resolvedDx = clampedDx * 0.1;
+          if (clampedDx === 0) {
+            dragX.setValue(0);
+            if (dragIntent !== 'none') setDragIntent('none');
+            return;
           }
-          dragX.setValue(resolvedDx);
+
+          if (!canAnimateForwardSwipe) {
+            dragX.setValue(0);
+            if (dragIntent !== 'none') setDragIntent('none');
+            return;
+          }
+
+          if (dragIntent === 'none' && Math.abs(clampedDx) > 6) setDragIntent('left');
+          dragX.setValue(clampedDx);
         },
         onPanResponderRelease: (_evt, g) => {
-          if (isCommittingRef.current) {
-            resetDrag();
-            return;
-          }
-          if (!pageCountReady) {
-            resetDrag();
-            return;
-          }
+          if (isCommittingRef.current) { resetDrag(); return; }
+          if (!pageCountReady) { resetDrag(); return; }
           const dx = g.dx;
           const dragPercent = Math.abs(dx) / Math.max(1, screenWidth);
           const velocity = g.vx;
           const shouldSnap = dragPercent >= 0.12 || Math.abs(velocity) >= 0.2;
 
-          if (!shouldSnap || totalPages <= 0) {
-            resetDrag();
+          if (!shouldSnap || totalPages <= 0 || dragIntent === 'none') { resetDrag(); return; }
+
+          if (dx < 0 && canAnimateForwardSwipe && currentPage < totalPages) {
+            commitPageWithAnimatedSnap(currentPage + 1, -1);
             return;
           }
 
-          if (dragIntent === 'none') {
-            resetDrag();
+          if (dx > 0 && canAnimateBackwardSwipe && currentPage > 1) {
+            commitPageWithAnimatedSnap(currentPage - 1, 1);
             return;
           }
 
-          const direction = dx > 0 ? 1 : -1;
-          const nextPage = direction > 0 ? currentPage - 1 : currentPage + 1;
-          if (nextPage < 1 || (totalPages > 0 && nextPage > totalPages)) {
-            resetDrag();
-            return;
-          }
-
-          commitPageWithAnimatedSnap(nextPage, direction);
+          resetDrag();
         },
         onPanResponderTerminate: () => {
           resetDrag();
         },
       }),
-    [dragX, screenWidth, totalPages, currentPage, resetDrag, commitPageWithAnimatedSnap, pageCountReady, dragIntent]
+    [dragX, screenWidth, totalPages, currentPage, resetDrag, commitPageWithAnimatedSnap, pageCountReady, dragIntent, canAnimateForwardSwipe, canAnimateBackwardSwipe, currentPageReady]
   );
 
   useEffect(() => {
@@ -465,52 +457,49 @@ export default function PdfReaderNativeScreen() {
 
   const currentOpacity = dragX.interpolate({
     inputRange: [-screenWidth, 0, screenWidth],
-    outputRange: [0.76, 1, 0.9],
+    outputRange: [0.82, 1, 0.82],
     extrapolate: 'clamp',
   });
   const currentScale = dragX.interpolate({
     inputRange: [-screenWidth, 0, screenWidth],
-    outputRange: [0.97, 1, 0.99],
+    outputRange: [0.98, 1, 0.98],
     extrapolate: 'clamp',
   });
-
-  const currentTranslateX = dragIntent === 'left'
-    ? dragX.interpolate({
-        inputRange: [-screenWidth, 0, screenWidth],
-        outputRange: [-screenWidth, 0, screenWidth * 0.05],
-        extrapolate: 'clamp',
-      })
-    : dragX.interpolate({
-        inputRange: [-screenWidth, 0, screenWidth],
-        outputRange: [-screenWidth * 0.08, 0, 0],
-        extrapolate: 'clamp',
-      });
-
-  const behindOpacity = dragX.interpolate({
+  const currentTranslateX = dragX.interpolate({
     inputRange: [-screenWidth, 0, screenWidth],
-    outputRange: [1, 0, 1],
+    outputRange: [-screenWidth, 0, screenWidth],
     extrapolate: 'clamp',
   });
 
-  const behindScale = dragX.interpolate({
-    inputRange: [-screenWidth, 0, screenWidth],
-    outputRange: [1, 0.98, 1],
+  // Forward (left drag): next page slides in from right
+  const forwardBehindOpacity = dragX.interpolate({
+    inputRange: [-screenWidth, 0],
+    outputRange: [1, 0],
+    extrapolate: 'clamp',
+  });
+  const forwardBehindTranslateX = dragX.interpolate({
+    inputRange: [-screenWidth, 0],
+    outputRange: [0, screenWidth],
     extrapolate: 'clamp',
   });
 
-  const behindTranslateX = hybridDirection === 'left'
-    ? dragX.interpolate({
-        inputRange: [-screenWidth, 0, screenWidth],
-        outputRange: [0, screenWidth * 0.18, screenWidth * 0.24],
-        extrapolate: 'clamp',
-      })
-    : dragX.interpolate({
-        inputRange: [-screenWidth, 0, screenWidth],
-        outputRange: [-screenWidth * 0.24, -screenWidth * 0.18, 0],
-        extrapolate: 'clamp',
-      });
+  // Backward (right drag): prev page slides in from left
+  const backwardBehindOpacity = dragX.interpolate({
+    inputRange: [0, screenWidth],
+    outputRange: [0, 1],
+    extrapolate: 'clamp',
+  });
+  const backwardBehindTranslateX = dragX.interpolate({
+    inputRange: [0, screenWidth],
+    outputRange: [-screenWidth, 0],
+    extrapolate: 'clamp',
+  });
 
-  const hybridTargetUri = hybridTargetPage ? getPageImage(hybridTargetPage) : null;
+  const forwardBehindUri = settlingTargetUri ?? nextPageImageUri;
+  const backwardBehindUri = settlingTargetUri ?? prevPageImageUri;
+  const showAnimatedForwardLayers = canAnimateForwardSwipe && (dragIntent === 'left' || (settlingTargetPage !== null && settlingTargetPage > currentPage));
+  const showAnimatedBackwardLayers = canAnimateBackwardSwipe && (dragIntent === 'right' || (settlingTargetPage !== null && settlingTargetPage < currentPage));
+  const showAnimatedLayers = showAnimatedForwardLayers || showAnimatedBackwardLayers;
 
   useEffect(() => {
     if (!hybridEnabled || !extractorReady || extractorBusy || totalPages <= 0 || !extractorDocumentId) return;
@@ -519,14 +508,26 @@ export default function PdfReaderNativeScreen() {
       currentPage,
       totalPages,
       radius: 2,
-      direction: hybridDirection,
+      direction: dragIntent,
     });
 
     if (pagesNeeded.length === 0) return;
 
     const inFlight = extractorInFlightPageRef.current;
     const queueSet = new Set(extractorQueueRef.current);
-    const incoming = pagesNeeded.filter((page) => page !== inFlight && !queueSet.has(page));
+    const incoming = pagesNeeded
+      .filter((page) => page !== inFlight && !queueSet.has(page))
+      .sort((leftPage, rightPage) => {
+        const priority = (page: number) => {
+          if (page === currentPage) return 0;
+          if (page === currentPage + 1) return 1;
+          if (page === currentPage - 1) return 2;
+          return page;
+        };
+
+        return priority(leftPage) - priority(rightPage);
+      });
+
     if (incoming.length > 0) {
       extractorQueueRef.current = [...extractorQueueRef.current, ...incoming];
     }
@@ -550,9 +551,8 @@ export default function PdfReaderNativeScreen() {
         setPageImage(page, uri);
         touch(page);
       })
-      .catch((error) => {
-        setHybridState('fallback');
-        setHybridError(error instanceof Error ? error.message : 'native_render_failed');
+      .catch(() => {
+        // page image extraction failed; live Pdf remains the base
       })
       .finally(() => {
         setExtractorBusy(false);
@@ -565,7 +565,7 @@ export default function PdfReaderNativeScreen() {
     extractorDocumentId,
     currentPage,
     totalPages,
-    hybridDirection,
+    dragIntent,
     screenWidth,
     primeWindow,
     cachedPages,
@@ -1090,30 +1090,7 @@ export default function PdfReaderNativeScreen() {
               </View>
             ) : (
               <>
-                {hybridEnabled && hybridTargetUri && hybridTargetPage ? (
-                  <Animated.View
-                    pointerEvents="none"
-                    style={[
-                      styles.pageLayer,
-                      {
-                        opacity: behindOpacity,
-                        transform: [{ translateX: behindTranslateX }, { scale: behindScale }],
-                      },
-                    ]}
-                  >
-                    <Image source={{ uri: hybridTargetUri }} style={styles.web} contentFit="contain" />
-                  </Animated.View>
-                ) : null}
-
-                <Animated.View
-                  style={[
-                    styles.pageLayer,
-                    {
-                      opacity: currentOpacity,
-                      transform: [{ translateX: currentTranslateX }, { scale: currentScale }],
-                    },
-                  ]}
-                >
+                <View style={styles.pageLayer}>
                   <Pdf
                     key={`native-current-${resolvedFileUri}-${currentPage}`}
                     source={{ uri: activePdfUri, cache: false }}
@@ -1124,14 +1101,84 @@ export default function PdfReaderNativeScreen() {
                     scrollEnabled={false}
                     singlePage={true}
                     spacing={0}
+                    onLoadComplete={() => {
+                      setCurrentPageReady(true);
+                      dragX.setValue(0);
+
+                      if (settlingTargetPage === currentPage && settlingTargetUri) {
+                        Animated.timing(settlingOverlayOpacity, {
+                          toValue: 0,
+                          duration: 120,
+                          useNativeDriver: true,
+                        }).start(() => {
+                          setSettlingTargetPage(null);
+                          setSettlingTargetUri(null);
+                          settlingOverlayOpacity.setValue(1);
+                        });
+                      }
+                    }}
                     onError={(err: unknown) => {
                       console.log('[PdfReaderNative] page render failed:', err);
-                      setHybridState('fallback');
-                      setHybridError('live_page_render_failed');
+                      setCurrentPageReady(true);
+                      dragX.setValue(0);
+                      setSettlingTargetPage(null);
+                      setSettlingTargetUri(null);
+                      settlingOverlayOpacity.setValue(1);
                     }}
                     renderActivityIndicator={() => <ActivityIndicator size="small" color="#6D6D6D" />}
                   />
-                </Animated.View>
+                </View>
+
+                {hybridEnabled && showAnimatedForwardLayers && forwardBehindUri ? (
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[
+                      styles.pageLayer,
+                      {
+                        opacity: forwardBehindOpacity,
+                        transform: [{ translateX: forwardBehindTranslateX }],
+                      },
+                    ]}
+                  >
+                    <Image source={{ uri: forwardBehindUri }} style={styles.web} contentFit="contain" />
+                  </Animated.View>
+                ) : null}
+
+                {hybridEnabled && showAnimatedBackwardLayers && backwardBehindUri ? (
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[
+                      styles.pageLayer,
+                      {
+                        opacity: backwardBehindOpacity,
+                        transform: [{ translateX: backwardBehindTranslateX }],
+                      },
+                    ]}
+                  >
+                    <Image source={{ uri: backwardBehindUri }} style={styles.web} contentFit="contain" />
+                  </Animated.View>
+                ) : null}
+
+                {showAnimatedLayers && currentPageImageUri ? (
+                  <Animated.View
+                    pointerEvents="none"
+                    style={[
+                      styles.pageLayer,
+                      {
+                        opacity: currentOpacity,
+                        transform: [{ translateX: currentTranslateX }, { scale: currentScale }],
+                      },
+                    ]}
+                  >
+                    <Image source={{ uri: currentPageImageUri }} style={styles.web} contentFit="contain" />
+                  </Animated.View>
+                ) : null}
+
+                {settlingTargetUri && settlingTargetPage === currentPage && !currentPageReady ? (
+                  <Animated.View pointerEvents="none" style={[styles.pageLayer, { opacity: settlingOverlayOpacity }]}>
+                    <Image source={{ uri: settlingTargetUri }} style={styles.web} contentFit="contain" />
+                  </Animated.View>
+                ) : null}
               </>
             )}
 
@@ -1179,11 +1226,7 @@ export default function PdfReaderNativeScreen() {
           <Text style={styles.pageIndicator}>
             Page {currentPage} {totalPages > 0 ? `of ${totalPages}` : ''}
           </Text>
-          {hybridEnabled ? (
-            <Text style={styles.hybridIndicator}>
-              Hybrid {hybridState}{hybridError ? ` (${hybridError})` : ''}
-            </Text>
-          ) : null}
+
         </View>
       )}
     </SafeAreaView>
@@ -1234,6 +1277,9 @@ const styles = StyleSheet.create({
   },
   pageLayer: {
     ...StyleSheet.absoluteFillObject,
+  },
+  hiddenPageLayer: {
+    opacity: 0,
   },
   pageBackdrop: {
     ...StyleSheet.absoluteFillObject,
