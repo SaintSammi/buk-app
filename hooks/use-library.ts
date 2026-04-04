@@ -9,7 +9,9 @@ import {
   DEFAULT_COVER_URI,
   cleanFileNameToTitle,
   defaultBooks,
+  isEpubAsset,
   isPdfAsset,
+  isTxtAsset,
 } from '@/types/models';
 
 const STORAGE_KEY = 'books';
@@ -80,15 +82,40 @@ export function useLibrary() {
         return [existing, ...prev.filter((b) => b.id !== existing.id)];
       });
 
-      router.push({
-        pathname: '/pdf-reader',
-        params: {
-          bookId: book.id,
-          title: book.title,
-          author: book.author || undefined,
-          fileUri: book.fileUri,
-        },
-      });
+      const sourceType = book.sourceType ?? 'other';
+
+      if (sourceType === 'pdf') {
+        router.push({
+          pathname: '/pdf-reader',
+          params: {
+            bookId: book.id,
+            title: book.title,
+            author: book.author || undefined,
+            fileUri: book.fileUri,
+          },
+        });
+      } else if (sourceType === 'epub') {
+        router.push({
+          pathname: '/epub-reader',
+          params: {
+            bookId: book.id,
+            title: book.title,
+            author: book.author || undefined,
+            fileUri: book.fileUri,
+          },
+        });
+      } else if (sourceType === 'txt') {
+        router.push({
+          pathname: '/txt-reader',
+          params: {
+            bookId: book.id,
+            title: book.title,
+            fileUri: book.fileUri,
+          },
+        });
+      } else {
+        Alert.alert('Unsupported Format', 'This file format is not supported. Please import a PDF, EPUB, or TXT file.');
+      }
     },
     [router]
   );
@@ -121,24 +148,31 @@ export function useLibrary() {
 
     for (let idx = 0; idx < assets.length; idx++) {
       const asset = assets[idx];
-      const selectedIsPdf = isPdfAsset(asset as unknown as {
-        name?: string;
-        mimeType?: string;
-        type?: string;
-      });
+      const assetMeta = asset as unknown as { name?: string; mimeType?: string; type?: string };
+      const selectedIsPdf = isPdfAsset(assetMeta);
+      const selectedIsEpub = !selectedIsPdf && isEpubAsset(assetMeta);
+      const selectedIsTxt = !selectedIsPdf && !selectedIsEpub && isTxtAsset(assetMeta);
+
+      const sourceType: Book['sourceType'] = selectedIsPdf
+        ? 'pdf'
+        : selectedIsEpub
+        ? 'epub'
+        : selectedIsTxt
+        ? 'txt'
+        : 'other';
 
       const title = cleanFileNameToTitle(asset.name) || asset.name || 'Untitled Book';
       const author = selectedIsPdf ? 'Unknown Author' : '';
       let fileUri = asset.uri;
 
-      // For PDFs, copy to persistent cache to survive content:// URI expiry
-      if (selectedIsPdf && fileUri.startsWith('content://')) {
+      // Copy to persistent cache to survive content:// URI expiry
+      if ((selectedIsPdf || selectedIsEpub || selectedIsTxt) && fileUri.startsWith('content://')) {
         try {
           const persistentUri = `${persistentCacheDir}${Date.now()}-${idx}-${asset.name}`;
           await FileSystem.copyAsync({ from: fileUri, to: persistentUri });
           fileUri = persistentUri;
         } catch (error) {
-          console.warn(`Failed to copy PDF ${asset.name}:`, error);
+          console.warn(`Failed to copy ${asset.name}:`, error);
         }
       }
 
@@ -147,7 +181,7 @@ export function useLibrary() {
         title,
         author,
         fileUri,
-        sourceType: selectedIsPdf ? 'pdf' : 'other',
+        sourceType,
         coverUri: selectedIsPdf ? undefined : DEFAULT_COVER_URI,
       });
     }

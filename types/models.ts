@@ -4,7 +4,7 @@ export type Book = {
   author: string;
   coverUri?: string;
   fileUri?: string;
-  sourceType?: 'pdf' | 'other';
+  sourceType?: 'pdf' | 'epub' | 'txt' | 'other';
 };
 
 export const DEFAULT_COVER_URI = 'https://covers.openlibrary.org/b/id/8231856-L.jpg';
@@ -47,6 +47,20 @@ export function isPdfAsset(asset: { name?: string; mimeType?: string; type?: str
   const mimeType = asset?.mimeType ?? asset?.type ?? '';
   const uri = (asset as any)?.uri?.toLowerCase?.() ?? '';
   return name.endsWith('.pdf') || String(mimeType).toLowerCase().includes('pdf') || uri.includes('.pdf');
+}
+
+export function isEpubAsset(asset: { name?: string; mimeType?: string; type?: string } | undefined) {
+  const name = asset?.name?.toLowerCase() ?? '';
+  const mimeType = String(asset?.mimeType ?? asset?.type ?? '').toLowerCase();
+  const uri = (asset as any)?.uri?.toLowerCase?.() ?? '';
+  return name.endsWith('.epub') || mimeType.includes('epub') || uri.includes('.epub');
+}
+
+export function isTxtAsset(asset: { name?: string; mimeType?: string; type?: string } | undefined) {
+  const name = asset?.name?.toLowerCase() ?? '';
+  const mimeType = String(asset?.mimeType ?? asset?.type ?? '').toLowerCase();
+  const uri = (asset as any)?.uri?.toLowerCase?.() ?? '';
+  return name.endsWith('.txt') || mimeType === 'text/plain' || uri.includes('.txt');
 }
 
 export function cleanFileNameToTitle(fileName: string) {

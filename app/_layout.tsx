@@ -1,6 +1,7 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
 import { Manrope_500Medium, Manrope_700Bold } from '@expo-google-fonts/manrope';
 import { PlayfairDisplay_500Medium_Italic } from '@expo-google-fonts/playfair-display/500Medium_Italic';
+import { Inter_400Regular, Inter_600SemiBold } from '@expo-google-fonts/inter';
 import { useFonts } from 'expo-font';
 import { Stack } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
@@ -20,6 +21,8 @@ export default function RootLayout() {
     PlayfairDisplay_500Medium_Italic,
     Manrope_500Medium,
     Manrope_700Bold,
+    Inter_400Regular,
+    Inter_600SemiBold,
   });
 
   useEffect(() => {
