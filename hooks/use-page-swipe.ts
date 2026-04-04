@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Animated, PanResponder } from 'react-native';
 
 type DragIntent = 'none' | 'left' | 'right';
@@ -35,7 +35,6 @@ export function usePageSwipe({
   const totalPagesRef = useRef(totalPages);
   const pageCountReadyRef = useRef(pageCountReady);
   const dragIntentRef = useRef<DragIntent>('none');
-  // Stable ref to the callback — panResponder never captures stale closures
   const onPageCommitRef = useRef(onPageCommit);
 
   // Sync refs every render so panResponder handlers always read fresh values
@@ -46,20 +45,39 @@ export function usePageSwipe({
   pageCountReadyRef.current = pageCountReady;
   onPageCommitRef.current = onPageCommit;
 
+  const prevPageRef = useRef(currentPage);
+
+  // Synchronously reset animated values when React commits the new page state.
+  // This runs AFTER React mounts the new images, but BEFORE the screen paints.
+  // It completely prevents the old page from flashing back, and the new page from popping.
+  useLayoutEffect(() => {
+    if (currentPage !== prevPageRef.current) {
+      prevPageRef.current = currentPage;
+      dragX.setValue(0);
+      forwardOffsetAnim.setValue(screenWidthRef.current);
+      backwardOffsetAnim.setValue(-screenWidthRef.current);
+      isCommittingRef.current = false;
+    }
+  }, [currentPage, dragX, forwardOffsetAnim, backwardOffsetAnim, screenWidthRef]);
+
   // Reset animated state when the opened file changes
   useEffect(() => {
     dragX.setValue(0);
+    forwardOffsetAnim.setValue(screenWidthRef.current);
+    backwardOffsetAnim.setValue(-screenWidthRef.current);
     dragIntentRef.current = 'none';
     setDragIntent('none');
     isCommittingRef.current = false;
-  }, [fileUri, dragX]);
+  }, [fileUri, dragX, forwardOffsetAnim, backwardOffsetAnim, screenWidthRef]);
 
   const resetDrag = useCallback(() => {
     dragIntentRef.current = 'none';
     setDragIntent('none');
+    // useNativeDriver: false — keeps animations on the JS thread, in sync
+    // with React state updates (React 18 batches all in one render).
     Animated.spring(dragX, {
       toValue: 0,
-      useNativeDriver: true,
+      useNativeDriver: false,
       tension: 180,
       friction: 20,
       overshootClamping: true,
@@ -72,16 +90,36 @@ export function usePageSwipe({
       const exitX = direction > 0 ? screenWidthRef.current : -screenWidthRef.current;
       const speed = Math.min(Math.abs(velocityX), 4);
       const duration = Math.max(80, 220 - speed * 30);
+
+      // useNativeDriver: false keeps the animation on the JS thread.
+      //
+      // WHY: with useNativeDriver: true, the animated value lives on the native
+      // thread — outside React's batch mechanism. Any setValue from the callback
+      // and the setCurrentPage state update land in different native frames,
+      // causing a flash of the wrong page.
+      //
+      // With useNativeDriver: false, animated value updates go through React's
+      // own setState/setNativeProps. We delay the reset of dragX until
+      // useLayoutEffect detects the new currentPage, so position and content
+      // update on the exact same frame.
       Animated.timing(dragX, {
         toValue: exitX,
         duration,
-        useNativeDriver: true,
-      }).start(() => {
+        useNativeDriver: false,
+      }).start(({ finished }) => {
+        if (!finished) {
+          isCommittingRef.current = false;
+          return;
+        }
+
+        // We only trigger the state update here.
+        // The actual reset of `dragX` and `offsets` will happen securely
+        // inside the `useLayoutEffect` above, exactly when the new page renders.
         onPageCommitRef.current(nextPage);
-        dragX.setValue(0);
         dragIntentRef.current = 'none';
         setDragIntent('none');
-        isCommittingRef.current = false;
+        // We DO NOT set isCommittingRef.current = false here.
+        // It stays locked until useLayoutEffect completes the visual reset.
       });
     },
     [dragX, screenWidthRef]
@@ -90,10 +128,10 @@ export function usePageSwipe({
   const panResponder = useMemo(
     () =>
       PanResponder.create({
-        onStartShouldSetPanResponder: () => false,
+        onStartShouldSetPanResponder: () => !isCommittingRef.current,
         onStartShouldSetPanResponderCapture: () => false,
-        onMoveShouldSetPanResponder: (_evt, g) => !isCommittingRef.current && Math.abs(g.dx) > Math.abs(g.dy) && Math.abs(g.dx) > 6,
-        onMoveShouldSetPanResponderCapture: (_evt, g) => !isCommittingRef.current && Math.abs(g.dx) > Math.abs(g.dy) && Math.abs(g.dx) > 6,
+        onMoveShouldSetPanResponder: (_evt, g) => !isCommittingRef.current && Math.abs(g.dx) > Math.abs(g.dy) && Math.abs(g.dx) > 4,
+        onMoveShouldSetPanResponderCapture: (_evt, g) => !isCommittingRef.current && Math.abs(g.dx) > Math.abs(g.dy) && Math.abs(g.dx) > 4,
         onPanResponderGrant: () => {
           if (isCommittingRef.current) return;
           dragX.stopAnimation();

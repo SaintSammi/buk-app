@@ -245,6 +245,7 @@ export default function PdfReaderNativeScreen() {
             {extractorIsReady ? (
               <>
                 <PageStrip
+                  currentPage={currentPage}
                   prevUri={getPageImage(currentPage - 1)}
                   currentUri={getPageImage(currentPage)}
                   nextUri={getPageImage(currentPage + 1)}

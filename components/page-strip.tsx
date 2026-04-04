@@ -3,6 +3,7 @@ import { Animated, StyleSheet, View } from 'react-native';
 import { Image } from 'expo-image';
 
 type PageStripProps = {
+  currentPage: number;
   prevUri: string | null;
   currentUri: string | null;
   nextUri: string | null;
@@ -12,6 +13,7 @@ type PageStripProps = {
 };
 
 export default function PageStrip({
+  currentPage,
   prevUri,
   currentUri,
   nextUri,
@@ -28,43 +30,38 @@ export default function PageStrip({
     [translateX, backwardOffsetAnim]
   );
 
+  const pages = useMemo(() => {
+    return [
+      { page: currentPage - 1, uri: prevUri, position: 'prev' as const },
+      { page: currentPage, uri: currentUri, position: 'curr' as const },
+      { page: currentPage + 1, uri: nextUri, position: 'next' as const },
+    ].filter((p) => p.page > 0);
+  }, [currentPage, prevUri, currentUri, nextUri]);
+
   return (
     <View style={StyleSheet.absoluteFill}>
-      {/* Prev page slides in from the left (positive offset from translateX) */}
-      <Animated.View
-        pointerEvents="none"
-        style={[StyleSheet.absoluteFill, { transform: [{ translateX: backwardTranslateX }] }]}
-      >
-        {prevUri ? (
-          <Image source={{ uri: prevUri }} style={styles.fill} contentFit="contain" />
-        ) : (
-          <View style={styles.placeholder} />
-        )}
-      </Animated.View>
+      {pages.map(({ page, uri, position }) => {
+        const panX =
+          position === 'prev'
+            ? backwardTranslateX
+            : position === 'next'
+            ? forwardTranslateX
+            : translateX;
 
-      {/* Next page slides in from the right (negative offset from translateX) */}
-      <Animated.View
-        pointerEvents="none"
-        style={[StyleSheet.absoluteFill, { transform: [{ translateX: forwardTranslateX }] }]}
-      >
-        {nextUri ? (
-          <Image source={{ uri: nextUri }} style={styles.fill} contentFit="contain" />
-        ) : (
-          <View style={styles.placeholder} />
-        )}
-      </Animated.View>
-
-      {/* Current page sits at translateX */}
-      <Animated.View
-        pointerEvents="none"
-        style={[StyleSheet.absoluteFill, { transform: [{ translateX }] }]}
-      >
-        {currentUri ? (
-          <Image source={{ uri: currentUri }} style={styles.fill} contentFit="contain" />
-        ) : (
-          <View style={styles.placeholder} />
-        )}
-      </Animated.View>
+        return (
+          <Animated.View
+            key={page}
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFill, { transform: [{ translateX: panX }] }]}
+          >
+            {uri ? (
+              <Image source={{ uri }} style={styles.fill} contentFit="contain" />
+            ) : (
+              <View style={styles.placeholder} />
+            )}
+          </Animated.View>
+        );
+      })}
     </View>
   );
 }
