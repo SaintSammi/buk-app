@@ -96,7 +96,7 @@ export function usePdfRasterizer({
     if (pagesNeeded.length === 0) return;
 
     const inFlight = extractorInFlightPageRef.current;
-    
+
     // Completely overwrite the queue with currently needed pages, sorted by priority.
     // This abandons any queued pages that are no longer relevant due to fast scrolling.
     extractorQueueRef.current = pagesNeeded

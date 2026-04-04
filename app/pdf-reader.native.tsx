@@ -49,7 +49,7 @@ export default function PdfReaderNativeScreen() {
     (newPage: number) => {
       setCurrentPage(newPage);
       if (progressKey && AsyncStorage) {
-        AsyncStorage.setItem(progressKey, String(newPage)).catch(() => {});
+        AsyncStorage.setItem(progressKey, String(newPage)).catch(() => { });
       }
     },
     [progressKey, AsyncStorage]
