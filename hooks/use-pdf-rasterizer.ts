@@ -1,4 +1,4 @@
-import { InteractionManager, PixelRatio } from 'react-native';
+import { PixelRatio } from 'react-native';
 import { useEffect, useRef, useState } from 'react';
 import { usePdfImageCache } from './use-pdf-image-cache';
 import {
@@ -34,7 +34,7 @@ export function usePdfRasterizer({
   const extractorQueueRef = useRef<number[]>([]);
   const extractorInFlightPageRef = useRef<number | null>(null);
 
-  const { getPageImage, primeWindow, setPageImage, touch, clear: clearCache } = usePdfImageCache({ maxEntries: 6 });
+  const { getPageImage, primeWindow, setPageImage, touch, clear: clearCache } = usePdfImageCache({ maxEntries: 14 });
 
   // Reset when file changes
   useEffect(() => {
@@ -87,15 +87,20 @@ export function usePdfRasterizer({
 
   // Extraction queue — runs one page at a time, drives the LRU cache
   useEffect(() => {
-    if (!extractorReady || extractorBusy || totalPages <= 0 || !extractorDocumentId) return;
+    // Do not start new extractions while the user is actively swiping.
+    // Rendering a full-screen bitmap pegs the device CPU, which starves the JS bridge
+    // and causes the `PanResponder` to feel delayed or the animation to drop frames ("flickering").
+    if (!extractorReady || extractorBusy || totalPages <= 0 || !extractorDocumentId || dragDirection !== 'none') return;
 
     const pagesNeeded = primeWindow({ currentPage, totalPages, radius: 2, direction: dragDirection });
     if (pagesNeeded.length === 0) return;
 
     const inFlight = extractorInFlightPageRef.current;
-    const queueSet = new Set(extractorQueueRef.current);
-    const incoming = pagesNeeded
-      .filter((p) => p !== inFlight && !queueSet.has(p))
+    
+    // Completely overwrite the queue with currently needed pages, sorted by priority.
+    // This abandons any queued pages that are no longer relevant due to fast scrolling.
+    extractorQueueRef.current = pagesNeeded
+      .filter((p) => p !== inFlight)
       .sort((a, b) => {
         const dist = (p: number) => {
           if (p === currentPage) return 0;
@@ -105,10 +110,6 @@ export function usePdfRasterizer({
         };
         return dist(a) - dist(b);
       });
-
-    if (incoming.length > 0) {
-      extractorQueueRef.current = [...extractorQueueRef.current, ...incoming];
-    }
 
     if (extractorQueueRef.current.length === 0) return;
 
@@ -124,10 +125,10 @@ export function usePdfRasterizer({
     const physHeight = Math.floor(physWidth * 1.6);
     renderPdfPageToImage({ documentId: extractorDocumentId, page, width: physWidth, height: physHeight, quality: 95 })
       .then((uri) => {
-        InteractionManager.runAfterInteractions(() => {
-          setPageImage(page, uri);
-          touch(page);
-        });
+        // Discard the delay logic. Set the image instantly so the user sees it
+        // during fast swiping gestures instead of getting black screens.
+        setPageImage(page, uri);
+        touch(page);
       })
       .catch(() => {
         // Silent — Pdf component base remains visible

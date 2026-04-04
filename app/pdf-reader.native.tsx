@@ -55,7 +55,7 @@ export default function PdfReaderNativeScreen() {
     [progressKey, AsyncStorage]
   );
 
-  const { panHandlers, translateX, forwardOffsetAnim, backwardOffsetAnim, dragIntent } = usePageSwipe({
+  const { panHandlers, translateX, dragIntent, getPageBase } = usePageSwipe({
     fileUri: resolvedFileUri,
     currentPage,
     totalPages,
@@ -170,8 +170,6 @@ export default function PdfReaderNativeScreen() {
     const width = event.nativeEvent.layout.width;
     if (width > 0) {
       screenWidthRef.current = width;
-      forwardOffsetAnim.setValue(width);
-      backwardOffsetAnim.setValue(-width);
     }
   };
 
@@ -250,8 +248,7 @@ export default function PdfReaderNativeScreen() {
                   currentUri={getPageImage(currentPage)}
                   nextUri={getPageImage(currentPage + 1)}
                   translateX={translateX}
-                  forwardOffsetAnim={forwardOffsetAnim}
-                  backwardOffsetAnim={backwardOffsetAnim}
+                  getPageBase={getPageBase}
                 />
                 <View style={styles.gestureOverlay} {...panHandlers} />
               </>

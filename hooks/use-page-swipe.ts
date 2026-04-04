@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Animated, PanResponder } from 'react-native';
 
 type DragIntent = 'none' | 'left' | 'right';
@@ -25,8 +25,6 @@ export function usePageSwipe({
   const [dragIntent, setDragIntent] = useState<DragIntent>('none');
 
   const dragX = useRef(new Animated.Value(0)).current;
-  const forwardOffsetAnim = useRef(new Animated.Value(screenWidthRef.current)).current;
-  const backwardOffsetAnim = useRef(new Animated.Value(-screenWidthRef.current)).current;
 
   const isCommittingRef = useRef(false);
   const canGoForwardRef = useRef(canGoForward);
@@ -37,6 +35,12 @@ export function usePageSwipe({
   const dragIntentRef = useRef<DragIntent>('none');
   const onPageCommitRef = useRef(onPageCommit);
 
+  // Per-page base offset Animated.Values.
+  // Each page gets a stable Animated.Value that never changes identity,
+  // only its internal numeric value. This means the Animated.add() topology
+  // created in PageStrip never has to be rebuilt — zero bridge thrashing.
+  const pageBasesRef = useRef<Map<number, Animated.Value>>(new Map());
+
   // Sync refs every render so panResponder handlers always read fresh values
   canGoForwardRef.current = canGoForward;
   canGoBackwardRef.current = canGoBackward;
@@ -45,36 +49,82 @@ export function usePageSwipe({
   pageCountReadyRef.current = pageCountReady;
   onPageCommitRef.current = onPageCommit;
 
+  // Get or create a stable Animated.Value for a page's base offset.
+  // Called during render (from PageStrip) — safe because it's idempotent.
+  const getPageBase = useCallback((page: number): Animated.Value => {
+    let base = pageBasesRef.current.get(page);
+    if (!base) {
+      const cp = currentPageRef.current;
+      const sw = screenWidthRef.current;
+      const offset = page < cp ? -sw : page > cp ? sw : 0;
+      base = new Animated.Value(offset);
+      pageBasesRef.current.set(page, base);
+    }
+    return base;
+  }, [screenWidthRef]);
+
   const prevPageRef = useRef(currentPage);
 
-  // Synchronously reset animated values when React commits the new page state.
-  // This runs AFTER React mounts the new images, but BEFORE the screen paints.
-  // It completely prevents the old page from flashing back, and the new page from popping.
+  // ──────────────────────────────────────────────────────────────────────
+  // SINGLE ATOMIC RESET — the heartbeat of glitch-free page transitions.
+  //
+  // When currentPage changes (after a commit animation finishes):
+  //   1. Reset dragX to 0
+  //   2. Reset ALL per-page base offsets to their correct positions
+  //   3. Unlock the gesture gate
+  //
+  // Because ALL setValue calls happen inside ONE useLayoutEffect:
+  //   • They're synchronous JS calls in a single task
+  //   • React Native batches all resulting setNativeProps into one native frame
+  //   • No intermediate state is ever painted to the screen
+  //
+  // Previously, base offsets were reset in PageStrip's useLayoutEffect
+  // (a child component), which fired BEFORE this hook's useLayoutEffect.
+  // That created a 1-frame window where bases were corrected but dragX
+  // was still at exitX — causing the black flash.
+  // ──────────────────────────────────────────────────────────────────────
   useLayoutEffect(() => {
     if (currentPage !== prevPageRef.current) {
       prevPageRef.current = currentPage;
+      const sw = screenWidthRef.current;
+
+      // 1. Reset the drag offset
       dragX.setValue(0);
-      forwardOffsetAnim.setValue(screenWidthRef.current);
-      backwardOffsetAnim.setValue(-screenWidthRef.current);
+
+      // 2. Reset every known page base to its correct slot
+      pageBasesRef.current.forEach((base, page) => {
+        if (page === currentPage) base.setValue(0);
+        else if (page === currentPage - 1) base.setValue(-sw);
+        else if (page === currentPage + 1) base.setValue(sw);
+        // Pages outside the ±1 window: park far away (they're invisible)
+        else base.setValue(page < currentPage ? -sw * 2 : sw * 2);
+      });
+
+      // 3. Prune stale entries to prevent unbounded growth
+      for (const [page] of pageBasesRef.current) {
+        if (Math.abs(page - currentPage) > 3) {
+          pageBasesRef.current.delete(page);
+        }
+      }
+
+      // 4. Unlock gesture gate
       isCommittingRef.current = false;
     }
-  }, [currentPage, dragX, forwardOffsetAnim, backwardOffsetAnim, screenWidthRef]);
+  }, [currentPage, dragX, screenWidthRef]);
 
   // Reset animated state when the opened file changes
   useEffect(() => {
     dragX.setValue(0);
-    forwardOffsetAnim.setValue(screenWidthRef.current);
-    backwardOffsetAnim.setValue(-screenWidthRef.current);
+    pageBasesRef.current.clear();
     dragIntentRef.current = 'none';
     setDragIntent('none');
     isCommittingRef.current = false;
-  }, [fileUri, dragX, forwardOffsetAnim, backwardOffsetAnim, screenWidthRef]);
+    prevPageRef.current = currentPage;
+  }, [fileUri, dragX, currentPage]);
 
   const resetDrag = useCallback(() => {
     dragIntentRef.current = 'none';
     setDragIntent('none');
-    // useNativeDriver: false — keeps animations on the JS thread, in sync
-    // with React state updates (React 18 batches all in one render).
     Animated.spring(dragX, {
       toValue: 0,
       useNativeDriver: false,
@@ -91,17 +141,6 @@ export function usePageSwipe({
       const speed = Math.min(Math.abs(velocityX), 4);
       const duration = Math.max(80, 220 - speed * 30);
 
-      // useNativeDriver: false keeps the animation on the JS thread.
-      //
-      // WHY: with useNativeDriver: true, the animated value lives on the native
-      // thread — outside React's batch mechanism. Any setValue from the callback
-      // and the setCurrentPage state update land in different native frames,
-      // causing a flash of the wrong page.
-      //
-      // With useNativeDriver: false, animated value updates go through React's
-      // own setState/setNativeProps. We delay the reset of dragX until
-      // useLayoutEffect detects the new currentPage, so position and content
-      // update on the exact same frame.
       Animated.timing(dragX, {
         toValue: exitX,
         duration,
@@ -112,14 +151,12 @@ export function usePageSwipe({
           return;
         }
 
-        // We only trigger the state update here.
-        // The actual reset of `dragX` and `offsets` will happen securely
-        // inside the `useLayoutEffect` above, exactly when the new page renders.
+        // Only trigger the state update. The ENTIRE visual reset
+        // (dragX + all page bases) happens atomically in the
+        // useLayoutEffect above when currentPage changes.
         onPageCommitRef.current(nextPage);
         dragIntentRef.current = 'none';
         setDragIntent('none');
-        // We DO NOT set isCommittingRef.current = false here.
-        // It stays locked until useLayoutEffect completes the visual reset.
       });
     },
     [dragX, screenWidthRef]
@@ -193,8 +230,7 @@ export function usePageSwipe({
   return {
     panHandlers: panResponder.panHandlers,
     translateX: dragX,
-    forwardOffsetAnim,
-    backwardOffsetAnim,
     dragIntent,
+    getPageBase,
   };
 }
