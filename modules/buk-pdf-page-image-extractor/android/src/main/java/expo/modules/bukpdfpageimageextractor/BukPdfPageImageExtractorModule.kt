@@ -82,7 +82,7 @@ class BukPdfPageImageExtractorModule : Module() {
 
         val renderBitmap = Bitmap.createBitmap(renderWidth, renderHeight, Bitmap.Config.ARGB_8888)
 
-        pdfPage.render(renderBitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+        pdfPage.render(renderBitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
         canvas.drawBitmap(renderBitmap, offsetX.toFloat(), offsetY.toFloat(), null)
         renderBitmap.recycle()
       } finally {

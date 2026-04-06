@@ -55,17 +55,21 @@ export default function PdfThumbnail({
         { backgroundColor: '#EFEFEF' },
         { overflow: 'hidden' },
       ]}>
-      <Pdf
-        source={{ uri: resolvedUri, cache: false }}
-        page={1}
-        singlePage
-        scale={1}
-        style={{ flex: 1, backgroundColor: '#EFEFEF' }}
-        onError={() => setFailed(true)}
-        renderActivityIndicator={() => (
-          <ActivityIndicator size="small" color="#6D6D6D" />
-        )}
-      />
+      <View style={{ flex: 1, backgroundColor: '#EFEFEF', transform: [{ scale: 1.15 }] }}>
+        <Pdf
+          source={{ uri: resolvedUri, cache: false }}
+          page={1}
+          singlePage
+          scale={1}
+          fitPolicy={0}
+          pointerEvents="none"
+          style={{ flex: 1, backgroundColor: '#EFEFEF' }}
+          onError={() => setFailed(true)}
+          renderActivityIndicator={() => (
+            <ActivityIndicator size="small" color="#6D6D6D" />
+          )}
+        />
+      </View>
     </View>
   );
 }

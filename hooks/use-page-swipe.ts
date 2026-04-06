@@ -12,6 +12,7 @@ export function usePageSwipe({
   canGoForward,
   canGoBackward,
   onPageCommit,
+  onSingleTap,
 }: {
   fileUri: string;
   currentPage: number;
@@ -21,6 +22,7 @@ export function usePageSwipe({
   canGoForward: boolean;
   canGoBackward: boolean;
   onPageCommit: (newPage: number) => void;
+  onSingleTap?: () => void;
 }) {
   const [dragIntent, setDragIntent] = useState<DragIntent>('none');
 
@@ -34,6 +36,8 @@ export function usePageSwipe({
   const pageCountReadyRef = useRef(pageCountReady);
   const dragIntentRef = useRef<DragIntent>('none');
   const onPageCommitRef = useRef(onPageCommit);
+  const onSingleTapRef = useRef(onSingleTap);
+  const touchStartTimeRef = useRef(0);
 
   // Per-page base offset Animated.Values.
   // Each page gets a stable Animated.Value that never changes identity,
@@ -48,6 +52,7 @@ export function usePageSwipe({
   totalPagesRef.current = totalPages;
   pageCountReadyRef.current = pageCountReady;
   onPageCommitRef.current = onPageCommit;
+  onSingleTapRef.current = onSingleTap;
 
   // Get or create a stable Animated.Value for a page's base offset.
   // Called during render (from PageStrip) — safe because it's idempotent.
@@ -171,6 +176,7 @@ export function usePageSwipe({
         onMoveShouldSetPanResponderCapture: (_evt, g) => !isCommittingRef.current && Math.abs(g.dx) > Math.abs(g.dy) && Math.abs(g.dx) > 4,
         onPanResponderGrant: () => {
           if (isCommittingRef.current) return;
+          touchStartTimeRef.current = Date.now();
           dragX.stopAnimation();
           dragX.setValue(0);
           dragIntentRef.current = 'none';
@@ -199,6 +205,12 @@ export function usePageSwipe({
         onPanResponderRelease: (_evt, g) => {
           if (isCommittingRef.current) { resetDrag(); return; }
           if (!pageCountReadyRef.current) { resetDrag(); return; }
+          const touchDuration = Date.now() - touchStartTimeRef.current;
+          if (touchDuration < 200 && Math.abs(g.dx) < 10 && Math.abs(g.dy) < 10) {
+            onSingleTapRef.current?.();
+            resetDrag();
+            return;
+          }
 
           const dx = g.dx;
           const vx = g.vx;

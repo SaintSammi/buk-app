@@ -90,7 +90,7 @@ export function usePdfRasterizer({
     // Do not start new extractions while the user is actively swiping.
     // Rendering a full-screen bitmap pegs the device CPU, which starves the JS bridge
     // and causes the `PanResponder` to feel delayed or the animation to drop frames ("flickering").
-    if (!extractorReady || extractorBusy || totalPages <= 0 || !extractorDocumentId || dragDirection !== 'none') return;
+    if (!extractorReady || extractorBusy || totalPages <= 0 || !extractorDocumentId) return;
 
     const pagesNeeded = primeWindow({ currentPage, totalPages, radius: 2, direction: dragDirection });
     if (pagesNeeded.length === 0) return;

@@ -1,5 +1,5 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -8,7 +8,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Reader, ReaderProvider, useReader } from '@epubjs-react-native/core';
@@ -28,6 +28,10 @@ function epubProgressKey(bookId: string) {
   return `epub-progress:${bookId}`;
 }
 
+function epubProgressPctKey(bookId: string) {
+  return `progress-pct:${bookId}`;
+}
+
 // Inner component — must be a child of ReaderProvider to use useReader
 function EpubReaderContent() {
   const router = useRouter();
@@ -38,13 +42,20 @@ function EpubReaderContent() {
     fileUri?: string;
   }>();
 
-  const { width, height } = useWindowDimensions();
-  const { section, progress, goToLocation } = useReader();
+  const { width } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const { goToLocation } = useReader();
 
   const [controlsVisible, setControlsVisible] = useState(true);
   const [savedCfi, setSavedCfi] = useState<string | null>(null);
   const [positionLoaded, setPositionLoaded] = useState(false);
-  const [readerHeight, setReaderHeight] = useState(height);
+  const [isReady, setIsReady] = useState(false);
+  const [displayProgress, setDisplayProgress] = useState(0);
+  const [currentPage, setCurrentPage] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [readerHeight, setReaderHeight] = useState(0);
+
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const resolvedBookId = bookId ? String(bookId) : '';
   const resolvedFileUri = fileUri ? String(fileUri) : '';
@@ -63,9 +74,16 @@ function EpubReaderContent() {
       .catch(() => setPositionLoaded(true));
   }, [resolvedBookId]);
 
-  // Restore position once the reader is ready
+  // onReady fires before locations are generated — nothing to do here
   const handleReady = useCallback(
-    (_total: number, _loc: Location, _progress: number) => {
+    (_total: number, _loc: Location, _progress: number) => {},
+    []
+  );
+
+  // onLocationsReady fires after book.locations.generate() — safe to seek by CFI
+  const handleLocationsReady = useCallback(
+    (_epubKey: string, _locations: string[]) => {
+      setIsReady(true);
       if (savedCfi) {
         goToLocation(savedCfi);
       }
@@ -73,38 +91,53 @@ function EpubReaderContent() {
     [savedCfi, goToLocation]
   );
 
-  // Persist position on every page turn
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+    };
+  }, []);
+
+  // Persist position on every page turn (debounced)
   const handleLocationChange = useCallback(
-    (_total: number, location: Location, _progress: number, _section: Section | null) => {
-      if (!resolvedBookId || !location?.start?.cfi) return;
-      AsyncStorage.setItem(epubProgressKey(resolvedBookId), location.start.cfi).catch(() => {});
+    (_total: number, location: Location, currentProgress: number, _section: Section | null) => {
+      if (!location?.start?.cfi) return;
+
+      // currentProgress is already 0–100 (library does Math.floor(percent * 100))
+      setDisplayProgress(Math.round(currentProgress));
+      // absolute index across whole book — not chapter-scoped
+      setCurrentPage(location.start.location + 1);
+      setTotalPages(_total);
+
+      if (!resolvedBookId) return;
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = setTimeout(() => {
+        AsyncStorage.setItem(epubProgressKey(resolvedBookId), location.start.cfi).catch(() => {});
+        AsyncStorage.setItem(epubProgressPctKey(resolvedBookId), String(currentProgress)).catch(() => {});
+      }, 500);
     },
     [resolvedBookId]
   );
 
-  const chapterLabel = section?.label?.trim() ?? '';
-  const displayProgress = Math.round((progress ?? 0) * 100);
+  const paginationText = isReady && totalPages > 0
+    ? `${currentPage} of ${totalPages}  •  ${displayProgress}%`
+    : isReady ? `${displayProgress}%` : '';
 
-  if (!positionLoaded) {
+  if (!positionLoaded || !resolvedFileUri) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.loadingOverlay}>
-          <ActivityIndicator color="#6D6D6D" />
-        </View>
-      </SafeAreaView>
+      <View style={[styles.container, styles.loadingOverlay]}>
+        <ActivityIndicator color="#6D6D6D" />
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
-      {/* Header — also acts as long-press target to hide controls */}
-      {controlsVisible ? (
-        <Pressable
-          style={styles.header}
-          onLongPress={() => setControlsVisible(false)}
-          delayLongPress={500}
-        >
+
+      {/* Header — in layout flow, not absolute, so Reader measures remaining height */}
+      {controlsVisible && (
+        <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) }]}>
           <Pressable style={styles.backButton} onPress={() => router.back()}>
             <Feather name="chevron-left" size={24} color="#FFF" />
           </Pressable>
@@ -112,52 +145,44 @@ function EpubReaderContent() {
             {title ? String(title) : 'EPUB Reader'}
           </Text>
           <View style={styles.headerSpacer} />
-        </Pressable>
-      ) : (
-        // Thin restore strip when controls are hidden — doesn't overlap reading content
-        <Pressable
-          style={styles.controlsRestoreStrip}
-          onPress={() => setControlsVisible(true)}
-          hitSlop={8}
-        />
+        </View>
       )}
 
-      {/* Reader */}
+      {/* Reader — height from onLayout so it never overlaps header/footer */}
       <View
         style={styles.readerWrapper}
         onLayout={(e) => setReaderHeight(e.nativeEvent.layout.height)}
       >
-        <Reader
-          src={resolvedFileUri}
-          width={width}
-          height={readerHeight}
-          fileSystem={useFileSystem}
-          defaultTheme={DARK_THEME}
-          flow="paginated"
-          onReady={handleReady}
-          onLocationChange={handleLocationChange}
-          renderLoadingFileComponent={() => (
-            <View style={styles.loadingOverlay}>
-              <ActivityIndicator color="#6D6D6D" />
-            </View>
-          )}
-        />
+        {readerHeight > 0 && (
+          <Reader
+            src={resolvedFileUri}
+            width={width}
+            height={readerHeight}
+            fileSystem={useFileSystem}
+            defaultTheme={DARK_THEME}
+            flow="paginated"
+            onReady={handleReady}
+            onLocationsReady={handleLocationsReady}
+            onLocationChange={handleLocationChange}
+            onSingleTap={() => setControlsVisible((prev) => !prev)}
+            renderLoadingFileComponent={() => (
+              <View style={styles.loadingOverlay}>
+                <ActivityIndicator color="#6D6D6D" />
+              </View>
+            )}
+          />
+        )}
       </View>
 
-      {/* Footer */}
+      {/* Footer — in layout flow */}
       {controlsVisible && (
-        <Pressable
-          style={styles.footer}
-          onLongPress={() => setControlsVisible(false)}
-          delayLongPress={500}
-        >
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
           <Text style={styles.footerText} numberOfLines={1}>
-            {chapterLabel ? `${chapterLabel}  •  ` : ''}
-            {displayProgress}%
+            {paginationText}
           </Text>
-        </Pressable>
+        </View>
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -175,11 +200,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
   },
   header: {
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255, 255, 255, 0.1)',
   },
@@ -199,10 +224,6 @@ const styles = StyleSheet.create({
   headerSpacer: {
     width: 40,
   },
-  controlsRestoreStrip: {
-    height: 6,
-    backgroundColor: 'transparent',
-  },
   readerWrapper: {
     flex: 1,
   },
@@ -212,9 +233,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   footer: {
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingTop: 10,
     alignItems: 'center',
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.1)',

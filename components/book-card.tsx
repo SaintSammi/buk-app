@@ -1,7 +1,14 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image } from 'expo-image';
+import { useFocusEffect } from 'expo-router';
+import { useCallback, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import PdfThumbnail from '@/components/pdf-thumbnail';
 import { Book, DEFAULT_COVER_URI } from '@/types/models';
+
+function progressPctKey(bookId: string) {
+  return `progress-pct:${bookId}`;
+}
 
 type BookCardProps = {
   book: Book;
@@ -10,6 +17,18 @@ type BookCardProps = {
 };
 
 export default function BookCard({ book, onPress, onLongPress }: BookCardProps) {
+  const [readProgress, setReadProgress] = useState(0);
+
+  useFocusEffect(
+    useCallback(() => {
+      AsyncStorage.getItem(progressPctKey(book.id))
+        .then((val) => {
+          if (val !== null) setReadProgress(parseFloat(val));
+        })
+        .catch(() => {});
+    }, [book.id])
+  );
+
   return (
     <Pressable style={styles.card} onPress={onPress} onLongPress={onLongPress}>
       {book.sourceType === 'pdf' && book.fileUri ? (
@@ -31,6 +50,11 @@ export default function BookCard({ book, onPress, onLongPress }: BookCardProps) 
             {book.author}
           </Text>
         )}
+        {readProgress > 0 && (
+          <View style={styles.progressTrack}>
+            <View style={[styles.progressFill, { width: `${readProgress * 100}%` }]} />
+          </View>
+        )}
       </View>
     </Pressable>
   );
@@ -42,13 +66,12 @@ const styles = StyleSheet.create({
     height: 106,
     borderRadius: 8,
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'stretch',
     overflow: 'hidden',
-    marginBottom: 24,
+    marginBottom: 16,
   },
   cover: {
-    width: 71,
-    height: 106,
+    width: 80,
   },
   textWrap: {
     flex: 1,
@@ -68,5 +91,16 @@ const styles = StyleSheet.create({
     fontSize: 10,
     lineHeight: 14,
     marginTop: 4,
+  },
+  progressTrack: {
+    marginTop: 8,
+    height: 2,
+    backgroundColor: '#E0E0E0',
+    borderRadius: 1,
+  },
+  progressFill: {
+    height: 2,
+    backgroundColor: '#0B0B0B',
+    borderRadius: 1,
   },
 });

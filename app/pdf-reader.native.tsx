@@ -1,7 +1,7 @@
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, LayoutChangeEvent, Pressable, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import { isPdfPageImageExtractorAvailable } from '@/services/pdf-page-image-extractor';
@@ -27,6 +27,7 @@ export default function PdfReaderNativeScreen() {
 
   const resolvedFileUri = fileUri ? String(fileUri) : '';
   const resolvedBookId = bookId ? String(bookId) : '';
+  const insets = useSafeAreaInsets();
   const AsyncStorage = getAsyncStorage();
   const progressKey = resolvedBookId && AsyncStorage ? `pdf-progress:${resolvedBookId}` : '';
 
@@ -50,9 +51,13 @@ export default function PdfReaderNativeScreen() {
       setCurrentPage(newPage);
       if (progressKey && AsyncStorage) {
         AsyncStorage.setItem(progressKey, String(newPage)).catch(() => { });
+        if (totalPages > 0) {
+          const pctKey = progressKey.replace('pdf-progress:', 'progress-pct:');
+          AsyncStorage.setItem(pctKey, String(newPage / totalPages)).catch(() => { });
+        }
       }
     },
-    [progressKey, AsyncStorage]
+    [progressKey, totalPages, AsyncStorage]
   );
 
   const { panHandlers, translateX, dragIntent, getPageBase } = usePageSwipe({
@@ -64,6 +69,7 @@ export default function PdfReaderNativeScreen() {
     canGoForward,
     canGoBackward,
     onPageCommit: handlePageCommit,
+    onSingleTap: () => setControlsVisible((prev) => !prev),
   });
 
   const { getPageImage, pageCount: extractorPageCount, isReady: extractorIsReady } = usePdfRasterizer({
@@ -191,11 +197,11 @@ export default function PdfReaderNativeScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
 
       {controlsVisible && (
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) }]}>
           <Pressable onPress={() => router.back()} style={styles.backButton}>
             <Feather name="chevron-left" size={24} color="#FFF" />
           </Pressable>
@@ -206,10 +212,9 @@ export default function PdfReaderNativeScreen() {
         </View>
       )}
 
-      <Pressable
+      <View
         style={styles.pdfWrapper}
         onLayout={handleLayout}
-        onLongPress={() => setControlsVisible((prev) => !prev)}
       >
         {extractorAvailable ? (
           // Extractor path (Android)
@@ -275,21 +280,17 @@ export default function PdfReaderNativeScreen() {
             onError={() => setPageCountReady(true)}
             renderActivityIndicator={() => <ActivityIndicator size="small" color="#6D6D6D" />}
           />
-        ) : (
-          <View style={styles.loadingOverlay}>
-            <ActivityIndicator color="#6D6D6D" />
-          </View>
-        )}
-      </Pressable>
+        ) : null}
+      </View>
 
       {controlsVisible && (
-        <View style={styles.footer}>
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
           <Text style={styles.pageIndicator}>
-            Page {currentPage}{totalPages > 0 ? ` of ${totalPages}` : ''}
+            Page {currentPage}{totalPages > 0 ? ` of ${totalPages}  •  ${Math.round((currentPage / totalPages) * 100)}%` : ''}
           </Text>
         </View>
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -299,7 +300,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
   },
   header: {
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
@@ -355,16 +361,20 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
   },
   footer: {
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 10,
+    alignItems: 'center',
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.1)',
-    alignItems: 'center',
   },
   pageIndicator: {
-    color: '#FFF',
-    fontSize: 14,
-    fontWeight: '500',
+    color: '#9BA1A6',
+    fontSize: 13,
   },
 });

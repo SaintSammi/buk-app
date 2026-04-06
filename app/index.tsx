@@ -1,4 +1,5 @@
 import { Feather } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { FlatList, Pressable, StyleSheet, Text, View, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import BookCard from '@/components/book-card';
@@ -51,7 +52,12 @@ export default function HomeScreen() {
         )}
       </View>
 
-      <View pointerEvents="box-none" style={styles.bottomBlurFrame}>
+      <LinearGradient
+        pointerEvents="box-none"
+        style={styles.bottomBlurFrame}
+        colors={['transparent', '#F2F2F2']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 1 }}>
         <View style={styles.bottomInner}>
           <Pressable style={styles.addButton} onPress={handleAddBook}>
             <View style={styles.addButtonContent}>
@@ -60,7 +66,7 @@ export default function HomeScreen() {
             </View>
           </Pressable>
         </View>
-      </View>
+      </LinearGradient>
     </SafeAreaView>
   );
 }
@@ -104,8 +110,6 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     height: 117,
-    overflow: 'hidden',
-    backgroundColor: '#2F2F2F',
   },
   bottomInner: {
     flex: 1,

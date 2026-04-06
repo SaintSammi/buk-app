@@ -6,7 +6,7 @@ import { WebView } from 'react-native-webview';
 import { Asset } from 'expo-asset';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Feather } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function PdfReaderScreen() {
   const router = useRouter();
@@ -25,6 +25,7 @@ export default function PdfReaderScreen() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
   const webViewRef = React.useRef<WebView>(null);
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     let cancelled = false;
@@ -151,12 +152,12 @@ export default function PdfReaderScreen() {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
       
       {/* Header */}
       {controlsVisible && (
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) }]}>
           <Pressable onPress={() => router.back()} style={styles.backButton}>
             <Feather name="chevron-left" size={24} color="#FFF" />
           </Pressable>
@@ -168,9 +169,8 @@ export default function PdfReaderScreen() {
       )}
 
       {/* PDF Content */}
-      <Pressable
+      <View
         style={styles.pdfWrapper}
-        onLongPress={() => setControlsVisible((prev) => !prev)}
       >
         <WebView
           ref={webViewRef}
@@ -196,21 +196,18 @@ export default function PdfReaderScreen() {
               console.log('[PdfReader] Error parsing message:', e);
             }
           }}
-          onError={(e) => {
-            console.log('[PdfReader] WebView error:', e.nativeEvent);
-          }}
         />
-      </Pressable>
+      </View>
 
       {/* Footer */}
       {controlsVisible && (
-        <View style={styles.footer}>
+        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
           <Text style={styles.pageIndicator}>
-            Page {currentPage} {totalPages > 0 ? `of ${totalPages}` : ''}
+            Page {currentPage}{totalPages > 0 ? ` of ${totalPages}  •  ${Math.round((currentPage / totalPages) * 100)}%` : ''}
           </Text>
         </View>
       )}
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -220,7 +217,12 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
   },
   header: {
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
@@ -252,17 +254,21 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
   },
   footer: {
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 10,
+    alignItems: 'center',
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.1)',
-    alignItems: 'center',
   },
   pageIndicator: {
-    color: '#FFF',
-    fontSize: 14,
-    fontWeight: '500',
+    color: '#9BA1A6',
+    fontSize: 13,
   },
 });
 
