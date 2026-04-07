@@ -1,6 +1,7 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState, useRef } from 'react';
 import {
+  Animated,
   ActivityIndicator,
   Pressable,
   StyleSheet,
@@ -17,7 +18,7 @@ import type { Location, Section } from '@epubjs-react-native/core';
 
 const DARK_THEME = {
   body: {
-    background: '#000000',
+    background: '#222222',
     color: '#ECEDEE',
     'line-height': '1.8',
   },
@@ -56,6 +57,8 @@ function EpubReaderContent() {
   const [readerHeight, setReaderHeight] = useState(0);
 
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const curtainAnim = useRef(new Animated.Value(1)).current;
+  const isAnimatingRef = useRef(false);
 
   const resolvedBookId = bookId ? String(bookId) : '';
   const resolvedFileUri = fileUri ? String(fileUri) : '';
@@ -119,6 +122,29 @@ function EpubReaderContent() {
     [resolvedBookId]
   );
 
+  const animatePageTurn = useCallback(
+    (dir: 'left' | 'right') => {
+      if (isAnimatingRef.current) return;
+      isAnimatingRef.current = true;
+      curtainAnim.setValue(dir === 'left' ? 1 : -1);
+      Animated.sequence([
+        Animated.timing(curtainAnim, {
+          toValue: 0,
+          duration: 130,
+          useNativeDriver: true,
+        }),
+        Animated.timing(curtainAnim, {
+          toValue: dir === 'left' ? -1 : 1,
+          duration: 200,
+          useNativeDriver: true,
+        }),
+      ]).start(() => {
+        isAnimatingRef.current = false;
+      });
+    },
+    [curtainAnim]
+  );
+
   const paginationText = isReady && totalPages > 0
     ? `${currentPage} of ${totalPages}  •  ${displayProgress}%`
     : isReady ? `${displayProgress}%` : '';
@@ -165,6 +191,8 @@ function EpubReaderContent() {
             onLocationsReady={handleLocationsReady}
             onLocationChange={handleLocationChange}
             onSingleTap={() => setControlsVisible((prev) => !prev)}
+            onSwipeLeft={() => animatePageTurn('left')}
+            onSwipeRight={() => animatePageTurn('right')}
             renderLoadingFileComponent={() => (
               <View style={styles.loadingOverlay}>
                 <ActivityIndicator color="#6D6D6D" />
@@ -172,6 +200,23 @@ function EpubReaderContent() {
             )}
           />
         )}
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            StyleSheet.absoluteFillObject,
+            {
+              backgroundColor: '#222222',
+              transform: [
+                {
+                  translateX: curtainAnim.interpolate({
+                    inputRange: [-1, 0, 1],
+                    outputRange: [-width, 0, width],
+                  }),
+                },
+              ],
+            },
+          ]}
+        />
       </View>
 
       {/* Footer — in layout flow */}
