@@ -1,7 +1,6 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useState, useRef } from 'react';
 import {
-  Animated,
   ActivityIndicator,
   Pressable,
   StyleSheet,
@@ -12,9 +11,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Reader, ReaderProvider, useReader } from '@epubjs-react-native/core';
-import { useFileSystem } from '@/hooks/use-epub-file-system';
-import type { Location, Section } from '@epubjs-react-native/core';
+import { BukEpubWebView } from '@/modules/buk-epub-reader';
+import type { BukMessageEvent, BukTapEvent } from '@/modules/buk-epub-reader';
+import { useEpubTemplate } from '@/hooks/use-epub-template';
 
 const DARK_THEME = {
   body: {
@@ -33,8 +32,7 @@ function epubProgressPctKey(bookId: string) {
   return `progress-pct:${bookId}`;
 }
 
-// Inner component — must be a child of ReaderProvider to use useReader
-function EpubReaderContent() {
+export default function EpubReaderScreen() {
   const router = useRouter();
   const { bookId, title, fileUri } = useLocalSearchParams<{
     bookId?: string;
@@ -45,25 +43,44 @@ function EpubReaderContent() {
 
   const { width } = useWindowDimensions();
   const insets = useSafeAreaInsets();
-  const { goToLocation } = useReader();
-
-  const [controlsVisible, setControlsVisible] = useState(true);
-  const [savedCfi, setSavedCfi] = useState<string | null>(null);
-  const [positionLoaded, setPositionLoaded] = useState(false);
-  const [isReady, setIsReady] = useState(false);
-  const [displayProgress, setDisplayProgress] = useState(0);
-  const [currentPage, setCurrentPage] = useState(0);
-  const [totalPages, setTotalPages] = useState(0);
-  const [readerHeight, setReaderHeight] = useState(0);
-
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const curtainAnim = useRef(new Animated.Value(1)).current;
-  const isAnimatingRef = useRef(false);
 
   const resolvedBookId = bookId ? String(bookId) : '';
   const resolvedFileUri = fileUri ? String(fileUri) : '';
 
-  // Load saved CFI on mount
+  // ── Template preparation ────────────────────────────────────────────────
+  const { templateUri, isReady: templateReady, error: templateError } = useEpubTemplate({
+    src: resolvedFileUri,
+    theme: DARK_THEME,
+    flow: 'paginated',
+  });
+
+  // ── Reader state ────────────────────────────────────────────────────────
+  const [controlsVisible, setControlsVisible] = useState(true);
+  const [savedCfi, setSavedCfi] = useState<string | null>(null);
+  const [positionLoaded, setPositionLoaded] = useState(false);
+  const [isBookReady, setIsBookReady] = useState(false);
+  const [currentPage, setCurrentPage] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+
+  // ── Imperative navigation via evaluateJavascript ─────────────────────────
+  // Shape: JSON.stringify({ id: Date.now(), script: '...' })
+  // A new id forces the native view to re-execute even for the same script.
+  const [injectJS, setInjectJS] = useState('');
+
+  function runScript(script: string) {
+    setInjectJS(JSON.stringify({ id: Date.now(), script }));
+  }
+  function goNext() { runScript('rendition.next()'); }
+  function goPrevious() { runScript('rendition.prev()'); }
+  function goToLocation(cfi: string) {
+    // Escape single-quotes inside the CFI so it embeds safely in a JS string
+    const safe = cfi.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    runScript(`rendition.display('${safe}')`);
+  }
+
+  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // ── Load saved CFI on mount ─────────────────────────────────────────────
   useEffect(() => {
     if (!resolvedBookId) {
       setPositionLoaded(true);
@@ -77,82 +94,88 @@ function EpubReaderContent() {
       .catch(() => setPositionLoaded(true));
   }, [resolvedBookId]);
 
-  // onReady fires before locations are generated — nothing to do here
-  const handleReady = useCallback(
-    (_total: number, _loc: Location, _progress: number) => {},
-    []
-  );
+  // ── epub.js message handler ─────────────────────────────────────────────
+  const savedCfiRef = useRef(savedCfi);
+  useEffect(() => { savedCfiRef.current = savedCfi; }, [savedCfi]);
 
-  // onLocationsReady fires after book.locations.generate() — safe to seek by CFI
-  const handleLocationsReady = useCallback(
-    (_epubKey: string, _locations: string[]) => {
-      setIsReady(true);
-      if (savedCfi) {
-        goToLocation(savedCfi);
+  const handleBukMessage = useCallback((event: BukMessageEvent) => {
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(event.nativeEvent.message) as Record<string, unknown>;
+    } catch {
+      return;
+    }
+
+    const type = parsed.type as string;
+
+    if (type === 'onLocationsReady') {
+      setIsBookReady(true);
+      // Navigate to saved position now that locations are indexed
+      if (savedCfiRef.current) {
+        goToLocation(savedCfiRef.current);
       }
-    },
-    [savedCfi, goToLocation]
-  );
+    }
 
-  // Cleanup timeout on unmount
+    if (type === 'onLocationChange') {
+      const location = parsed.currentLocation as {
+        start?: { location?: number; cfi?: string };
+      } | undefined;
+      const total = (parsed.totalLocations as number) ?? 0;
+      const progress = (parsed.progress as number) ?? 0;
+
+      if (location?.start?.location !== undefined) {
+        setCurrentPage(location.start.location + 1);
+      }
+      setTotalPages(total);
+
+      if (!resolvedBookId || !location?.start?.cfi) return;
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = setTimeout(() => {
+        AsyncStorage.setItem(epubProgressKey(resolvedBookId), location.start!.cfi!).catch(() => {});
+        // Store as 0–1 fraction (library sends 0–100)
+        AsyncStorage.setItem(epubProgressPctKey(resolvedBookId), String(progress / 100)).catch(() => {});
+      }, 500);
+    }
+
+    if (type === 'meta') {
+      const metadata = parsed.metadata as { cover?: string } | undefined;
+      if (resolvedBookId && metadata?.cover) {
+        AsyncStorage.setItem(`epub-cover:${resolvedBookId}`, metadata.cover).catch(() => {});
+      }
+    }
+  }, [resolvedBookId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Tap handler — 3-zone navigation ────────────────────────────────────
+  const handleBukTap = useCallback((event: BukTapEvent) => {
+    const x = event.nativeEvent.x; // in dp
+    if (x < width * 0.28) {
+      goPrevious();
+    } else if (x > width * 0.72) {
+      goNext();
+    } else {
+      setControlsVisible((v) => !v);
+    }
+  }, [width]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Cleanup ─────────────────────────────────────────────────────────────
   useEffect(() => {
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     };
   }, []);
 
-  // Persist position on every page turn (debounced)
-  const handleLocationChange = useCallback(
-    (_total: number, location: Location, currentProgress: number, _section: Section | null) => {
-      if (!location?.start?.cfi) return;
+  // ── Derived UI ──────────────────────────────────────────────────────────
+  const paginationText = isBookReady && totalPages > 0
+    ? `Page ${currentPage} / ${totalPages}`
+    : '';
 
-      // currentProgress is already 0–100 (library does Math.floor(percent * 100))
-      setDisplayProgress(Math.round(currentProgress));
-      // absolute index across whole book — not chapter-scoped
-      setCurrentPage(location.start.location + 1);
-      setTotalPages(_total);
+  const isLoading = !positionLoaded || !resolvedFileUri || !templateReady;
 
-      if (!resolvedBookId) return;
-      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-      saveTimeoutRef.current = setTimeout(() => {
-        AsyncStorage.setItem(epubProgressKey(resolvedBookId), location.start.cfi).catch(() => {});
-        AsyncStorage.setItem(epubProgressPctKey(resolvedBookId), String(currentProgress)).catch(() => {});
-      }, 500);
-    },
-    [resolvedBookId]
-  );
-
-  const animatePageTurn = useCallback(
-    (dir: 'left' | 'right') => {
-      if (isAnimatingRef.current) return;
-      isAnimatingRef.current = true;
-      curtainAnim.setValue(dir === 'left' ? 1 : -1);
-      Animated.sequence([
-        Animated.timing(curtainAnim, {
-          toValue: 0,
-          duration: 130,
-          useNativeDriver: true,
-        }),
-        Animated.timing(curtainAnim, {
-          toValue: dir === 'left' ? -1 : 1,
-          duration: 200,
-          useNativeDriver: true,
-        }),
-      ]).start(() => {
-        isAnimatingRef.current = false;
-      });
-    },
-    [curtainAnim]
-  );
-
-  const paginationText = isReady && totalPages > 0
-    ? `${currentPage} of ${totalPages}  •  ${displayProgress}%`
-    : isReady ? `${displayProgress}%` : '';
-
-  if (!positionLoaded || !resolvedFileUri) {
+  if (templateError) {
     return (
-      <View style={[styles.container, styles.loadingOverlay]}>
-        <ActivityIndicator color="#6D6D6D" />
+      <View style={[styles.container, styles.centered]}>
+        <Stack.Screen options={{ headerShown: false }} />
+        <Text style={styles.errorText}>Failed to load reader: {templateError}</Text>
       </View>
     );
   }
@@ -161,7 +184,7 @@ function EpubReaderContent() {
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
 
-      {/* Header — in layout flow, not absolute, so Reader measures remaining height */}
+      {/* ── Header ── */}
       {controlsVisible && (
         <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) }]}>
           <Pressable style={styles.backButton} onPress={() => router.back()}>
@@ -174,52 +197,24 @@ function EpubReaderContent() {
         </View>
       )}
 
-      {/* Reader — height from onLayout so it never overlaps header/footer */}
-      <View
-        style={styles.readerWrapper}
-        onLayout={(e) => setReaderHeight(e.nativeEvent.layout.height)}
-      >
-        {readerHeight > 0 && (
-          <Reader
-            src={resolvedFileUri}
-            width={width}
-            height={readerHeight}
-            fileSystem={useFileSystem}
-            defaultTheme={DARK_THEME}
-            flow="paginated"
-            onReady={handleReady}
-            onLocationsReady={handleLocationsReady}
-            onLocationChange={handleLocationChange}
-            onSingleTap={() => setControlsVisible((prev) => !prev)}
-            onSwipeLeft={() => animatePageTurn('left')}
-            onSwipeRight={() => animatePageTurn('right')}
-            renderLoadingFileComponent={() => (
-              <View style={styles.loadingOverlay}>
-                <ActivityIndicator color="#6D6D6D" />
-              </View>
-            )}
+      {/* ── Reader ── */}
+      <View style={styles.readerWrapper}>
+        {isLoading ? (
+          <View style={styles.centered}>
+            <ActivityIndicator color="#6D6D6D" />
+          </View>
+        ) : (
+          <BukEpubWebView
+            style={StyleSheet.absoluteFillObject}
+            src={templateUri!}
+            injectJS={injectJS}
+            onBukMessage={handleBukMessage}
+            onBukTap={handleBukTap}
           />
         )}
-        <Animated.View
-          pointerEvents="none"
-          style={[
-            StyleSheet.absoluteFillObject,
-            {
-              backgroundColor: '#222222',
-              transform: [
-                {
-                  translateX: curtainAnim.interpolate({
-                    inputRange: [-1, 0, 1],
-                    outputRange: [-width, 0, width],
-                  }),
-                },
-              ],
-            },
-          ]}
-        />
       </View>
 
-      {/* Footer — in layout flow */}
+      {/* ── Footer ── */}
       {controlsVisible && (
         <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
           <Text style={styles.footerText} numberOfLines={1}>
@@ -228,14 +223,6 @@ function EpubReaderContent() {
         </View>
       )}
     </View>
-  );
-}
-
-export default function EpubReaderScreen() {
-  return (
-    <ReaderProvider>
-      <EpubReaderContent />
-    </ReaderProvider>
   );
 }
 
@@ -272,7 +259,7 @@ const styles = StyleSheet.create({
   readerWrapper: {
     flex: 1,
   },
-  loadingOverlay: {
+  centered: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
@@ -288,5 +275,11 @@ const styles = StyleSheet.create({
   footerText: {
     color: '#9BA1A6',
     fontSize: 13,
+  },
+  errorText: {
+    color: '#FF6B6B',
+    fontSize: 14,
+    textAlign: 'center',
+    paddingHorizontal: 24,
   },
 });

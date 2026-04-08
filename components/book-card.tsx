@@ -18,6 +18,7 @@ type BookCardProps = {
 
 export default function BookCard({ book, onPress, onLongPress }: BookCardProps) {
   const [readProgress, setReadProgress] = useState(0);
+  const [cachedCoverUri, setCachedCoverUri] = useState<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -26,7 +27,13 @@ export default function BookCard({ book, onPress, onLongPress }: BookCardProps) 
           if (val !== null) setReadProgress(parseFloat(val));
         })
         .catch(() => {});
-    }, [book.id])
+
+      if (book.sourceType !== 'pdf') {
+        AsyncStorage.getItem(`epub-cover:${book.id}`)
+          .then((val) => { if (val) setCachedCoverUri(val); })
+          .catch(() => {});
+      }
+    }, [book.id, book.sourceType])
   );
 
   return (
@@ -35,7 +42,7 @@ export default function BookCard({ book, onPress, onLongPress }: BookCardProps) 
         <PdfThumbnail uri={book.fileUri} style={styles.cover} />
       ) : (
         <Image
-          source={{ uri: book.coverUri ?? DEFAULT_COVER_URI }}
+          source={{ uri: cachedCoverUri ?? book.coverUri ?? DEFAULT_COVER_URI }}
           style={styles.cover}
           contentFit="cover"
           transition={120}

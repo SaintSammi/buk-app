@@ -286,7 +286,7 @@ export default function PdfReaderNativeScreen() {
       {controlsVisible && (
         <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
           <Text style={styles.pageIndicator}>
-            Page {currentPage}{totalPages > 0 ? ` of ${totalPages}  •  ${Math.round((currentPage / totalPages) * 100)}%` : ''}
+            Page {currentPage}{totalPages > 0 ? ` of ${totalPages}` : ''}
           </Text>
         </View>
       )}
