@@ -21,12 +21,10 @@ import org.readium.r2.navigator.epub.EpubNavigatorFactory
 import org.readium.r2.navigator.epub.EpubPreferences
 import org.readium.r2.navigator.pdf.PdfNavigatorFactory
 import org.readium.r2.navigator.pdf.PdfNavigatorFragment
-import org.readium.r2.navigator.preferences.FontFamily
 import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.Publication
 import org.readium.r2.shared.util.AbsoluteUrl
 import org.readium.r2.shared.util.asset.AssetRetriever
-import org.readium.r2.shared.util.getOrElse
 import org.readium.r2.shared.util.http.DefaultHttpClient
 import org.readium.r2.shared.util.toAbsoluteUrl
 import org.readium.r2.shared.util.toUrl
@@ -157,8 +155,7 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
                 textColor = obj.optString("textColor").takeIf { it.isNotEmpty() }
                     ?.let { parseColor(it) },
                 fontSize = if (obj.has("fontSize")) obj.optDouble("fontSize").takeIf { !it.isNaN() } else null,
-                fontFamily = obj.optString("fontFamily").takeIf { it.isNotEmpty() }
-                    ?.let { FontFamily(it) },
+                fontFamily = obj.optString("fontFamily").takeIf { it.isNotEmpty() },
                 lineHeight = if (obj.has("lineHeight")) obj.optDouble("lineHeight").takeIf { !it.isNaN() } else null
             )
             hostFragment?.submitPreferences(prefs)

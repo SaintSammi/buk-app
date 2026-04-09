@@ -7,7 +7,6 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.fragment.app.Fragment
-import androidx.fragment.app.commitNow
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -19,7 +18,6 @@ import org.readium.r2.navigator.pdf.PdfNavigatorFragment
 import org.readium.r2.shared.ExperimentalReadiumApi
 import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.Publication
-import org.readium.r2.shared.publication.services.positions
 
 private const val TAG = "BukPdfHostFragment"
 private const val NAV_TAG = "PdfNavigator"
@@ -37,7 +35,7 @@ class BukPdfHostFragment : Fragment(), PdfNavigatorFragment.Listener {
     lateinit var publication: Publication
     lateinit var navigatorFactory: PdfNavigatorFactory<*, *, *>
 
-    private var navigator: PdfNavigatorFragment<*, *>? = null
+    private var navigator: PdfNavigatorFragment<*, *, *>? = null
     private var positionCount: Int = 0
 
     // ─── Fragment lifecycle ───────────────────────────────────────────────────
@@ -80,7 +78,7 @@ class BukPdfHostFragment : Fragment(), PdfNavigatorFragment.Listener {
         }
 
         @Suppress("UNCHECKED_CAST")
-        navigator = childFragmentManager.findFragmentByTag(NAV_TAG) as? PdfNavigatorFragment<*, *>
+        navigator = childFragmentManager.findFragmentByTag(NAV_TAG) as? PdfNavigatorFragment<*, *, *>
 
         return frame
     }
