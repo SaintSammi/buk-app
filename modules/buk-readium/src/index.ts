@@ -1,0 +1,119 @@
+import { requireNativeViewManager } from 'expo-modules-core';
+import type { StyleProp, ViewStyle } from 'react-native';
+
+// ─── Event types ──────────────────────────────────────────────────────────────
+
+export interface BukReadyEvent {
+  nativeEvent: {
+    /** Total number of positions (Readium's stable page equivalent) in the publication */
+    positionCount: number;
+  };
+}
+
+export interface BukLocationEvent {
+  nativeEvent: {
+    /** Serialised Readium Locator JSON — pass back to `initialLocator` to restore position */
+    locator: string;
+    /** Current position index (1-based) */
+    position: number;
+    /** Total positions */
+    positionCount: number;
+    /** Overall progression 0.0–1.0 */
+    progression: number;
+  };
+}
+
+export interface BukTapEvent {
+  nativeEvent: {
+    /** Tap X in logical dp */
+    x: number;
+    /** Tap Y in logical dp */
+    y: number;
+  };
+}
+
+export interface BukErrorEvent {
+  nativeEvent: {
+    message: string;
+  };
+}
+
+// ─── Command type ─────────────────────────────────────────────────────────────
+
+export type BukReadiumCommandType = 'next' | 'prev' | 'goto';
+
+export interface BukReadiumCommand {
+  /** Monotonically increasing id — native side deduplicates by id */
+  id: number;
+  type: BukReadiumCommandType;
+  /** Serialised Readium Locator JSON — only required for type 'goto' */
+  locator?: string;
+}
+
+/** Build a navigation command string ready for the `command` prop */
+export function buildCommand(type: BukReadiumCommandType, locator?: string): string {
+  return JSON.stringify({ id: Date.now(), type, locator } satisfies BukReadiumCommand);
+}
+
+// ─── Preferences type ─────────────────────────────────────────────────────────
+
+export interface BukReadiumPreferences {
+  /** CSS colour string, e.g. '#222222' */
+  backgroundColor?: string;
+  /** CSS colour string, e.g. '#ECEDEE' */
+  textColor?: string;
+  /** Font size multiplier, e.g. 1.2 for 120% */
+  fontSize?: number;
+  /** Font family name */
+  fontFamily?: string;
+  /** Line height multiplier */
+  lineHeight?: number;
+  /** 'auto' | 'ltr' | 'rtl' */
+  readingProgression?: 'auto' | 'ltr' | 'rtl';
+}
+
+// ─── View props ───────────────────────────────────────────────────────────────
+
+export interface BukReadiumViewProps {
+  style?: StyleProp<ViewStyle>;
+
+  /**
+   * Absolute `file://` path (or `content://` URI) of the publication to open.
+   * Changing this prop opens a new publication.
+   */
+  src?: string;
+
+  /**
+   * Serialised Readium `Locator` JSON to restore a saved reading position.
+   * Must be set before (or simultaneously with) `src`.
+   */
+  initialLocator?: string;
+
+  /**
+   * Serialised `BukReadiumPreferences` JSON.
+   * Applied live — navigator re-renders in place.
+   */
+  preferences?: string;
+
+  /**
+   * Serialised `BukReadiumCommand` JSON.
+   * Bump `id` for repeated same-type commands.
+   */
+  command?: string;
+
+  /** Fired once when the publication is opened and positions are ready */
+  onBukReady?: (event: BukReadyEvent) => void;
+
+  /** Fired on every page turn or programmatic navigation */
+  onBukLocation?: (event: BukLocationEvent) => void;
+
+  /** Fired on a tap that the navigator did not consume */
+  onBukTap?: (event: BukTapEvent) => void;
+
+  /** Fired on any error opening or rendering the publication */
+  onBukError?: (event: BukErrorEvent) => void;
+}
+
+// Module name must match Name("BukReadium") in BukReadiumModule.kt
+const BukReadiumView = requireNativeViewManager<BukReadiumViewProps>('BukReadium');
+export { BukReadiumView };

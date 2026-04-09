@@ -1,0 +1,11 @@
+{
+  "name": "buk-readium",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./expo-module.config": "./expo-module.config.json",
+    "./package.json": "./package.json"
+  }
+}

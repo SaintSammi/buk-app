@@ -1,0 +1,59 @@
+apply plugin: 'com.android.library'
+apply plugin: 'org.jetbrains.kotlin.android'
+
+def expoModulesCorePlugin = new File(project(":expo-modules-core").projectDir.absolutePath, "ExpoModulesCorePlugin.gradle")
+apply from: expoModulesCorePlugin
+
+android {
+  namespace "expo.modules.bukreadium"
+  compileSdk 36
+
+  defaultConfig {
+    minSdk 24
+    targetSdk 36
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+
+  kotlinOptions {
+    jvmTarget = '17'
+  }
+
+  // Readium uses Java 8+ APIs
+  buildFeatures {
+    buildConfig false
+  }
+}
+
+dependencies {
+  implementation project(":expo-modules-core")
+
+  // Readium Kotlin Toolkit 3.1.2
+  implementation ("org.readium.kotlin-toolkit:readium-shared:3.1.2") {
+    exclude group: "com.github.barteksc", module: "PdfiumAndroid"
+  }
+  implementation ("org.readium.kotlin-toolkit:readium-streamer:3.1.2") {
+    exclude group: "com.github.barteksc", module: "PdfiumAndroid"
+  }
+  implementation ("org.readium.kotlin-toolkit:readium-navigator:3.1.2") {
+    exclude group: "com.github.barteksc", module: "PdfiumAndroid"
+  }
+
+  // PDF support via Pdfium (open source)
+  // Exclude conflicting pdfium libraries — react-native-pdf provides io.legere:pdfiumandroid which
+  // ships the same libpdfiumandroid.so as the old barteksc/marain87 forks.
+  implementation ("org.readium.kotlin-toolkit:readium-adapter-pdfium:3.1.2") {
+    exclude group: "com.github.marain87", module: "AndroidPdfViewer"
+    exclude group: "com.github.barteksc", module: "PdfiumAndroid"
+  }
+
+  // Readium relies on kotlinx-coroutines — ensure compatible version
+  implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3"
+
+  // Lifecycle for collecting Flows in the fragment
+  implementation "androidx.lifecycle:lifecycle-runtime-ktx:2.7.0"
+  implementation "androidx.fragment:fragment-ktx:1.6.2"
+}
