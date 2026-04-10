@@ -84,13 +84,22 @@ export function useLibrary() {
 
       const sourceType = book.sourceType ?? 'other';
 
-      if (sourceType === 'pdf' || sourceType === 'epub') {
+      if (sourceType === 'epub') {
         router.push({
           pathname: '/reader',
           params: {
             bookId: book.id,
             title: book.title,
             author: book.author || undefined,
+            fileUri: book.fileUri,
+          },
+        });
+      } else if (sourceType === 'pdf') {
+        router.push({
+          pathname: '/pdf-reader',
+          params: {
+            bookId: book.id,
+            title: book.title,
             fileUri: book.fileUri,
           },
         });

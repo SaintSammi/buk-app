@@ -7,6 +7,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import androidx.fragment.app.Fragment
+import androidx.fragment.app.commitNow
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
@@ -19,6 +20,7 @@ import org.readium.r2.navigator.input.TapEvent
 import org.readium.r2.shared.ExperimentalReadiumApi
 import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.Publication
+import org.readium.r2.shared.publication.services.positions
 import org.readium.r2.shared.util.AbsoluteUrl
 
 private const val TAG = "BukReadiumHostFragment"
@@ -62,6 +64,7 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
     // ─── Fragment lifecycle ───────────────────────────────────────────────────
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        Log.i(TAG, "onCreate: savedInstanceState=${savedInstanceState != null}")
         val initialLocatorJson = arguments?.getString(ARG_INITIAL_LOCATOR)
         val initialLocator = initialLocatorJson?.let {
             try { Locator.fromJSON(org.json.JSONObject(it)) } catch (e: Exception) {
@@ -70,14 +73,21 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
             }
         }
 
+        Log.i(TAG, "onCreate: setting fragmentFactory initialLocator=$initialLocator")
         // IMPORTANT: fragmentFactory must be set BEFORE super.onCreate()
-        childFragmentManager.fragmentFactory =
-            navigatorFactory.createFragmentFactory(
-                initialLocator = initialLocator,
-                listener = this
-            )
+        try {
+            childFragmentManager.fragmentFactory =
+                navigatorFactory.createFragmentFactory(
+                    initialLocator = initialLocator,
+                    listener = this
+                )
+            Log.i(TAG, "onCreate: fragmentFactory set OK")
+        } catch (e: Exception) {
+            Log.e(TAG, "onCreate: createFragmentFactory FAILED", e)
+        }
 
         super.onCreate(savedInstanceState)
+        Log.i(TAG, "onCreate: super done")
     }
 
     override fun onCreateView(
@@ -85,6 +95,7 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
         container: ViewGroup?,
         savedInstanceState: Bundle?
     ): View {
+        Log.i(TAG, "onCreateView: savedInstanceState=${savedInstanceState != null}")
         val frame = FrameLayout(requireContext()).apply {
             id = View.generateViewId()
             layoutParams = ViewGroup.LayoutParams(
@@ -94,21 +105,33 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
         }
 
         if (savedInstanceState == null) {
-            childFragmentManager.commitNow {
-                add(frame.id, EpubNavigatorFragment::class.java, Bundle(), NAV_TAG)
+            Log.i(TAG, "onCreateView: committing EpubNavigatorFragment to frame id=${frame.id}")
+            try {
+                childFragmentManager.commitNow {
+                    add(frame.id, EpubNavigatorFragment::class.java, Bundle(), NAV_TAG)
+                }
+                Log.i(TAG, "onCreateView: EpubNavigatorFragment committed")
+            } catch (e: Exception) {
+                Log.e(TAG, "onCreateView: EpubNavigatorFragment commit FAILED", e)
             }
         }
 
         navigator = childFragmentManager.findFragmentByTag(NAV_TAG) as? EpubNavigatorFragment
+        Log.i(TAG, "onCreateView: navigator=${navigator != null}")
 
         return frame
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
+        Log.i(TAG, "onViewCreated: navigator=${navigator != null}")
 
-        val nav = navigator ?: return
+        val nav = navigator ?: run {
+            Log.e(TAG, "onViewCreated: navigator is null — cannot proceed")
+            return
+        }
 
+        Log.i(TAG, "onViewCreated: starting positions + flow collection")
         // Compute positions list once — this suspends briefly
         viewLifecycleOwner.lifecycleScope.launch {
             try {
@@ -141,6 +164,16 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
     }
 
     // ─── EpubNavigatorFragment.Listener (HyperlinkNavigator.Listener) ────────
+
+    override fun onStart() {
+        super.onStart()
+        Log.i(TAG, "onStart: navigator=${navigator != null} navigatorView=${navigator?.view != null}")
+    }
+
+    override fun onResume() {
+        super.onResume()
+        Log.i(TAG, "onResume: navigator=${navigator != null}")
+    }
 
     override fun onExternalLinkActivated(url: AbsoluteUrl) {
         // External links are ignored in reading mode

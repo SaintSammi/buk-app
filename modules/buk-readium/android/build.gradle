@@ -36,9 +36,6 @@ dependencies {
   implementation "org.readium.kotlin-toolkit:readium-streamer:3.1.2"
   implementation "org.readium.kotlin-toolkit:readium-navigator:3.1.2"
 
-  // PDF support via Pdfium (open source)
-  implementation "org.readium.kotlin-toolkit:readium-adapter-pdfium:3.1.2"
-
   // Readium relies on kotlinx-coroutines — ensure compatible version
   implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3"
 

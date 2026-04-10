@@ -4,23 +4,24 @@ import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
+import androidx.fragment.app.FragmentActivity
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import org.readium.r2.shared.ExperimentalReadiumApi
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 import org.readium.r2.navigator.epub.EpubDefaults
 import org.readium.r2.navigator.epub.EpubNavigatorFactory
 import org.readium.r2.navigator.epub.EpubPreferences
-import org.readium.r2.navigator.pdf.PdfNavigatorFactory
-import org.readium.r2.navigator.pdf.PdfNavigatorFragment
 import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.Publication
 import org.readium.r2.shared.util.AbsoluteUrl
@@ -31,6 +32,8 @@ import org.readium.r2.shared.util.toUrl
 import org.readium.r2.streamer.PublicationOpener
 import org.readium.r2.streamer.parser.DefaultPublicationParser
 import java.io.File
+import org.readium.r2.navigator.preferences.FontFamily
+import org.readium.r2.shared.util.getOrElse
 
 private const val TAG = "BukReadiumView"
 private const val FRAGMENT_TAG = "BukReadiumHost"
@@ -54,6 +57,7 @@ private const val FRAGMENT_TAG = "BukReadiumHost"
  *  - onBukTap       : {x, y}
  *  - onBukError     : {message}
  */
+@OptIn(ExperimentalReadiumApi::class)
 class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(context, appContext) {
 
     // ─── Events ──────────────────────────────────────────────────────────────
@@ -66,11 +70,13 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
     // ─── Internal state ───────────────────────────────────────────────────────
 
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+    private var scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
-    // Fragment container — has a generated ID so FragmentManager can target it
+    // Fragment container — uses a compile-time XML resource ID (0x7F range) so it
+    // never collides with React Native Fabric surface tags (1, 3, 5 …) or anything
+    // that View.generateViewId() / ViewCompat.generateViewId() could produce.
     private val container: FrameLayout = FrameLayout(context).also {
-        it.id = generateViewId()
+        it.id = R.id.buk_readium_container
         addView(it, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT))
     }
 
@@ -85,7 +91,7 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
                 context = context,
                 httpClient = httpClient,
                 assetRetriever = assetRetriever,
-                pdfFactory = org.readium.adapter.pdfium.document.PdfiumDocumentFactory(context)
+                pdfFactory = null
             )
         )
     }
@@ -98,14 +104,63 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
     private var pendingInitialLocator: String? = null
     private var pendingSrc: String? = null
     private var lastCommandId: Double = Double.MIN_VALUE
+    private var cleanupRunnable: Runnable? = null
+    // ─── Layout ──────────────────────────────────────────────────────────────
+
+    // React Native's Yoga engine swallows native requestLayout() calls that bubble
+    // up from inside Fragments (e.g. Readium's EpubNavigatorFragment WebView).
+    // We intercept and force a measure+layout pass so the Fragment view gets its size.
+    override fun requestLayout() {
+        super.requestLayout()
+        post {
+            measure(
+                MeasureSpec.makeMeasureSpec(width, MeasureSpec.EXACTLY),
+                MeasureSpec.makeMeasureSpec(height, MeasureSpec.EXACTLY)
+            )
+            layout(left, top, right, bottom)
+        }
+    }
 
     // ─── Lifecycle ────────────────────────────────────────────────────────────
 
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        Log.i(TAG, "onAttachedToWindow: src=$pendingSrc hasPub=${currentPublication != null} scopeActive=${scope.isActive}")
+        // Cancel any pending permanent-cleanup runnable from the last detach
+        cleanupRunnable?.let { mainHandler.removeCallbacks(it) }
+        cleanupRunnable = null
+        // Recreate scope only if it was cancelled by a true permanent detach
+        if (!scope.isActive) {
+            scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
+            Log.i(TAG, "onAttachedToWindow: scope recreated")
+        }
+        val src = pendingSrc
+        if (src != null && currentPublication == null) {
+            Log.i(TAG, "onAttachedToWindow: launching openPublicationInternal")
+            scope.launch { openPublicationInternal(src) }
+        } else {
+            Log.i(TAG, "onAttachedToWindow: no launch needed (src=$src hasPub=${currentPublication != null})")
+        }
+    }
+
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
-        scope.cancel()
-        currentPublication?.close()
-        currentPublication = null
+        Log.i(TAG, "onDetachedFromWindow: scheduling cleanup (scope NOT cancelled yet)")
+        // Do NOT cancel the scope here — RN temporarily detaches views during layout.
+        // After 500ms without re-attachment we treat it as a true permanent detach.
+        val r = Runnable {
+            if (!isAttachedToWindow) {
+                Log.i(TAG, "cleanup: permanent detach — cancelling scope")
+                scope.cancel()
+                dismountCurrentFragment()
+                currentPublication?.close()
+                currentPublication = null
+            } else {
+                Log.i(TAG, "cleanup: view re-attached — skipping")
+            }
+        }
+        cleanupRunnable = r
+        mainHandler.postDelayed(r, 500)
     }
 
     // ─── Props ───────────────────────────────────────────────────────────────
@@ -116,6 +171,11 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
 
     fun openPublication(src: String) {
         pendingSrc = src
+        Log.i(TAG, "openPublication: src=$src attached=$isAttachedToWindow scopeActive=${scope.isActive}")
+        if (!isAttachedToWindow) {
+            Log.i(TAG, "openPublication: deferred until onAttachedToWindow")
+            return
+        }
         scope.launch {
             openPublicationInternal(src)
         }
@@ -155,7 +215,8 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
                 textColor = obj.optString("textColor").takeIf { it.isNotEmpty() }
                     ?.let { parseColor(it) },
                 fontSize = if (obj.has("fontSize")) obj.optDouble("fontSize").takeIf { !it.isNaN() } else null,
-                fontFamily = obj.optString("fontFamily").takeIf { it.isNotEmpty() },
+                fontFamily = obj.optString("fontFamily").takeIf { it.isNotEmpty() }
+                    ?.let { FontFamily(it) },
                 lineHeight = if (obj.has("lineHeight")) obj.optDouble("lineHeight").takeIf { !it.isNaN() } else null
             )
             hostFragment?.submitPreferences(prefs)
@@ -167,13 +228,12 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
     // ─── Publication opening ──────────────────────────────────────────────────
 
     private suspend fun openPublicationInternal(src: String) {
+        Log.i(TAG, "openPublicationInternal: start src=$src")
         try {
-            // Clean up previous publication
             dismountCurrentFragment()
             currentPublication?.close()
             currentPublication = null
 
-            // Resolve src → Readium AbsoluteUrl
             val url: AbsoluteUrl = when {
                 src.startsWith("content://") || src.startsWith("file://") -> {
                     android.net.Uri.parse(src).toAbsoluteUrl()
@@ -182,32 +242,34 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
                     File(src).toUrl()
                 }
             } ?: run {
+                Log.e(TAG, "openPublicationInternal: cannot resolve URI: $src")
                 dispatchError("Invalid URI cannot be resolved: $src")
                 return
             }
 
-            // Retrieve asset
+            Log.i(TAG, "openPublicationInternal: retrieving asset url=$url")
             val asset = assetRetriever.retrieve(url)
                 .getOrElse { error ->
+                    Log.e(TAG, "openPublicationInternal: asset retrieval failed: $error")
                     dispatchError("Failed to retrieve asset: $error")
                     return
                 }
 
-            // Open publication
+            Log.i(TAG, "openPublicationInternal: opening publication")
             val publication = publicationOpener.open(asset, allowUserInteraction = false)
                 .getOrElse { error ->
+                    Log.e(TAG, "openPublicationInternal: publication open failed: $error")
                     asset.close()
                     dispatchError("Failed to open publication: $error")
                     return
                 }
 
             currentPublication = publication
+            Log.i(TAG, "openPublicationInternal: publication opened conformsEpub=${publication.conformsTo(Publication.Profile.EPUB)} conformsPdf=${publication.conformsTo(Publication.Profile.PDF)}")
 
-            // Detect format and mount the appropriate navigator
             when {
                 publication.conformsTo(Publication.Profile.EPUB) -> mountEpubNavigator(publication)
-                publication.conformsTo(Publication.Profile.PDF)  -> mountPdfNavigator(publication)
-                else -> dispatchError("Unsupported publication format")
+                else -> dispatchError("Unsupported publication format (only EPUB is supported)")
             }
         } catch (e: Exception) {
             Log.e(TAG, "openPublicationInternal failed", e)
@@ -216,6 +278,7 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
     }
 
     private fun mountEpubNavigator(publication: Publication) {
+        Log.i(TAG, "mountEpubNavigator: start")
         val factory = EpubNavigatorFactory(
             publication = publication,
             configuration = EpubNavigatorFactory.Configuration(
@@ -232,31 +295,17 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
         attachFragment(fragment)
     }
 
-    private fun mountPdfNavigator(publication: Publication) {
-        val pdfiumProvider = org.readium.adapter.pdfium.navigator.PdfiumEngineProvider()
-        val factory = PdfNavigatorFactory(
-            publication = publication,
-            pdfEngineProvider = pdfiumProvider
-        )
-
-        // For PDF, use a simpler BukPdfHostFragment wrapper
-        val fragment = BukPdfHostFragment.newInstance(pendingInitialLocator).also {
-            it.publication = publication
-            it.navigatorFactory = factory
-            it.viewListener = makeListener()
-        }
-
-        attachFragment(fragment)
-    }
-
     private fun attachFragment(fragment: androidx.fragment.app.Fragment) {
-        val activity = appContext.activityProvider?.currentActivity as? androidx.fragment.app.FragmentActivity
+        Log.i(TAG, "attachFragment: containerId=${container.id} containerW=${container.width} containerH=${container.height} attached=$isAttachedToWindow")
+        val activity = appContext.currentActivity as? FragmentActivity
             ?: run {
+                Log.e(TAG, "attachFragment: no FragmentActivity!")
                 dispatchError("No FragmentActivity available")
                 return
             }
 
         mainHandler.post {
+            Log.i(TAG, "attachFragment: committing fragment ${fragment.javaClass.simpleName}")
             try {
                 if (fragment is BukReadiumHostFragment) hostFragment = fragment
 
@@ -264,6 +313,7 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
                     .beginTransaction()
                     .replace(container.id, fragment, FRAGMENT_TAG)
                     .commitNowAllowingStateLoss()
+                Log.i(TAG, "attachFragment: commit success")
             } catch (e: Exception) {
                 Log.e(TAG, "attachFragment failed", e)
                 dispatchError("Failed to attach navigator fragment: ${e.message}")
@@ -272,11 +322,15 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
     }
 
     private fun dismountCurrentFragment() {
-        val activity = appContext.activityProvider?.currentActivity as? androidx.fragment.app.FragmentActivity
+        val activity = appContext.currentActivity as? FragmentActivity
             ?: return
         try {
+            // Only remove the fragment that THIS BukReadiumView instance added.
+            // A delayed cleanup runnable from an old instance must not remove a fragment
+            // that a newer instance has already committed under the same FRAGMENT_TAG.
+            val toRemove = hostFragment ?: return
             val existing = activity.supportFragmentManager.findFragmentByTag(FRAGMENT_TAG)
-            if (existing != null) {
+            if (existing === toRemove) {
                 activity.supportFragmentManager.beginTransaction()
                     .remove(existing)
                     .commitNowAllowingStateLoss()

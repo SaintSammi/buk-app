@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Stable container ID for the Readium fragment host, in the 0x7F app-resource
+         range — never conflicts with React Native Fabric surface tags (1, 3, 5 …)
+         or dynamically-generated IDs from View.generateViewId(). -->
+    <item name="buk_readium_container" type="id"/>
+</resources>
