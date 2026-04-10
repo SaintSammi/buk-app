@@ -297,7 +297,7 @@ export default function PdfReaderNativeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: '#725c5c',
   },
   header: {
     position: 'absolute',
@@ -334,7 +334,7 @@ const styles = StyleSheet.create({
   },
   fill: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: '#705959',
   },
   nativeStack: {
     flex: 1,
@@ -343,7 +343,7 @@ const styles = StyleSheet.create({
   },
   pageBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#121212',
+    backgroundColor: '#856a6a',
   },
   hiddenLayer: {
     opacity: 0,

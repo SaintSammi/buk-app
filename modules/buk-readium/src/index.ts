@@ -1,4 +1,4 @@
-import { requireNativeViewManager } from 'expo-modules-core';
+import { requireNativeModule, requireNativeViewManager } from 'expo-modules-core';
 import type { StyleProp, ViewStyle } from 'react-native';
 
 // ─── Event types ──────────────────────────────────────────────────────────────
@@ -115,5 +115,15 @@ export interface BukReadiumViewProps {
 }
 
 // Module name must match Name("BukReadium") in BukReadiumModule.kt
+const NativeBukReadium = requireNativeModule('BukReadium');
 const BukReadiumView = requireNativeViewManager<BukReadiumViewProps>('BukReadium');
+
+/**
+ * Extract the cover image from an EPUB file.
+ * Returns a `file://` URI to a cached JPEG, or `null` if no cover is found.
+ */
+export async function extractEpubCover(src: string): Promise<string | null> {
+  return NativeBukReadium.extractEpubCover(src);
+}
+
 export { BukReadiumView };

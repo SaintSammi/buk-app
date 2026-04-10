@@ -1,7 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Image } from 'expo-image';
 import { useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import PdfThumbnail from '@/components/pdf-thumbnail';
 import { Book, DEFAULT_COVER_URI } from '@/types/models';
@@ -19,6 +19,14 @@ type BookCardProps = {
 export default function BookCard({ book, onPress, onLongPress }: BookCardProps) {
   const [readProgress, setReadProgress] = useState(0);
   const [cachedCoverUri, setCachedCoverUri] = useState<string | null>(null);
+
+  // When book.coverUri is updated in-memory (e.g. after async extraction), clear
+  // the stale AsyncStorage-backed override so the new value shows immediately.
+  useEffect(() => {
+    if (book.coverUri && book.coverUri !== DEFAULT_COVER_URI) {
+      setCachedCoverUri(null);
+    }
+  }, [book.coverUri]);
 
   useFocusEffect(
     useCallback(() => {

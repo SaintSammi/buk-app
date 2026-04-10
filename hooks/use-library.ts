@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { extractEpubCover } from '@/modules/buk-readium/src';
 import {
   Book,
   DEFAULT_COVER_URI,
@@ -184,6 +185,27 @@ export function useLibrary() {
         coverUri: selectedIsPdf ? undefined : DEFAULT_COVER_URI,
       });
     }
+
+    // Extract EPUB covers asynchronously after building the book list.
+    // Persist to AsyncStorage AND update state so covers appear without
+    // requiring a screen-focus cycle.
+    const coverExtractions = importedBooks.map(async (book) => {
+      if (book.sourceType !== 'epub' || !book.fileUri) return;
+      try {
+        const coverUri = await extractEpubCover(book.fileUri);
+        if (coverUri) {
+          await AsyncStorage.setItem(`epub-cover:${book.id}`, coverUri);
+          // Update the book in state so the card re-renders immediately
+          setBooks((prev) =>
+            prev.map((b) => (b.id === book.id ? { ...b, coverUri } : b))
+          );
+        }
+      } catch {
+        // Non-fatal — BookCard will show the default cover
+      }
+    });
+    // Fire-and-forget: covers will appear as AsyncStorage is populated
+    Promise.all(coverExtractions).catch(() => {});
 
     // Newest imports first
     setBooks((prev) => [...importedBooks.reverse(), ...prev]);

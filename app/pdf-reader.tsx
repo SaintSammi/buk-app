@@ -214,7 +214,7 @@ export default function PdfReaderScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: '#464646',
   },
   header: {
     position: 'absolute',
@@ -251,7 +251,7 @@ const styles = StyleSheet.create({
   },
   web: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: '#222222',
   },
   footer: {
     position: 'absolute',
