@@ -1,6 +1,6 @@
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, LayoutChangeEvent, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Dimensions, LayoutChangeEvent, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -39,6 +39,7 @@ export default function PdfReaderNativeScreen() {
   const [uriReady, setUriReady] = useState(false);
 
   const screenWidthRef = useRef(360);
+  const screenHeightRef = useRef(Dimensions.get('window').height);
 
   // True only on Android with the native module loaded
   const extractorAvailable = useMemo(() => isPdfPageImageExtractorAvailable(), []);
@@ -75,6 +76,7 @@ export default function PdfReaderNativeScreen() {
   const { getPageImage, pageCount: extractorPageCount, isReady: extractorIsReady } = usePdfRasterizer({
     activePdfUri,
     screenWidthRef,
+    screenHeightRef,
     currentPage,
     totalPages,
     dragDirection: dragIntent,
@@ -173,10 +175,9 @@ export default function PdfReaderNativeScreen() {
   }, [pageCountReady, currentPage]);
 
   const handleLayout = (event: LayoutChangeEvent) => {
-    const width = event.nativeEvent.layout.width;
-    if (width > 0) {
-      screenWidthRef.current = width;
-    }
+    const { width, height } = event.nativeEvent.layout;
+    if (width > 0) screenWidthRef.current = width;
+    if (height > 0) screenHeightRef.current = height;
   };
 
   // Lazy-load react-native-pdf to avoid errors in environments where it isn't available

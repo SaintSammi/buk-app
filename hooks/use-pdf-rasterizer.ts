@@ -13,12 +13,14 @@ type DragDirection = 'none' | 'left' | 'right';
 export function usePdfRasterizer({
   activePdfUri,
   screenWidthRef,
+  screenHeightRef,
   currentPage,
   totalPages,
   dragDirection,
 }: {
   activePdfUri: string;
   screenWidthRef: { current: number };
+  screenHeightRef: { current: number };
   currentPage: number;
   totalPages: number;
   dragDirection: DragDirection;
@@ -120,9 +122,10 @@ export function usePdfRasterizer({
     setExtractorBusy(true);
 
     const cssWidth = Math.floor(screenWidthRef.current);
+    const cssHeight = Math.floor(screenHeightRef.current);
     const scale = PixelRatio.get();
     const physWidth = Math.floor(cssWidth * scale);
-    const physHeight = Math.floor(physWidth * 1.6);
+    const physHeight = Math.floor(cssHeight * scale);
     renderPdfPageToImage({ documentId: extractorDocumentId, page, width: physWidth, height: physHeight, quality: 95 })
       .then((uri) => {
         // Discard the delay logic. Set the image instantly so the user sees it

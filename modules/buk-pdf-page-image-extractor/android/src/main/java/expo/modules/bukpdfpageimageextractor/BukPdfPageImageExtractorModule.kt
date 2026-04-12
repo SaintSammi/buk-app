@@ -81,6 +81,9 @@ class BukPdfPageImageExtractorModule : Module() {
         val offsetY = (outputHeight - renderHeight) / 2
 
         val renderBitmap = Bitmap.createBitmap(renderWidth, renderHeight, Bitmap.Config.ARGB_8888)
+        // Fill with white so PDF text (which assumes a white page background) renders correctly.
+        // Without this, text on a transparent bitmap composited over the black canvas becomes invisible.
+        Canvas(renderBitmap).drawColor(Color.WHITE)
 
         pdfPage.render(renderBitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_PRINT)
         canvas.drawBitmap(renderBitmap, offsetX.toFloat(), offsetY.toFloat(), null)

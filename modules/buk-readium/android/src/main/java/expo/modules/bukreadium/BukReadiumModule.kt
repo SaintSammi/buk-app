@@ -119,6 +119,14 @@ class BukReadiumModule : Module() {
             Prop("command") { view: BukReadiumView, cmd: String? ->
                 view.handleCommand(cmd)
             }
+
+            /**
+             * Top inset in logical dp (CSS pixels). Pushes the Readium content area down
+             * so text starts below the header overlay without moving the view's frame.
+             */
+            Prop("contentInsetTop") { view: BukReadiumView, insetDp: Double? ->
+                view.setContentInsetTop(insetDp?.toFloat() ?: 0f)
+            }
         }
     }
 }

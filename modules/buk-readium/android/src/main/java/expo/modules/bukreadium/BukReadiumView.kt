@@ -205,8 +205,12 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
         }
     }
 
-    fun applyPreferences(json: String?) {
-        if (json.isNullOrEmpty()) return
+    fun setContentInsetTop(insetDp: Float) {
+        val px = (insetDp * resources.displayMetrics.density).toInt()
+        hostFragment?.setContentInsetTopPx(px)
+    }
+
+    fun applyPreferences(json: String?) {        if (json.isNullOrEmpty()) return
         try {
             val obj = JSONObject(json)
             val prefs = EpubPreferences(

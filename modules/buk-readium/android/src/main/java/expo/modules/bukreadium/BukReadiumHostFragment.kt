@@ -5,6 +5,7 @@ import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.WebView
 import android.widget.FrameLayout
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.commitNow
@@ -60,6 +61,35 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
 
     // Cached total positions — populated once navigator is ready
     private var positionCount: Int = 0
+
+    // CSS top inset (px) to inject into the epub WebView content
+    private var contentInsetTopPx: Int = 0
+
+    fun setContentInsetTopPx(px: Int) {
+        contentInsetTopPx = px
+        injectInsetCss()
+    }
+
+    private fun findWebView(view: View?): WebView? {
+        if (view == null) return null
+        if (view is WebView) return view
+        if (view !is ViewGroup) return null
+        for (i in 0 until view.childCount) {
+            findWebView(view.getChildAt(i))?.let { return it }
+        }
+        return null
+    }
+
+    private fun injectInsetCss() {
+        val webView = findWebView(navigator?.view) ?: return
+        val css = if (contentInsetTopPx > 0) {
+            "body { padding-top: ${contentInsetTopPx}px !important; }"
+        } else {
+            ""
+        }
+        val script = """(function(){var s=document.getElementById('buk-top-inset');if(!s){s=document.createElement('style');s.id='buk-top-inset';(document.head||document.documentElement).appendChild(s);}s.textContent='$css';})();"""
+        webView.post { webView.evaluateJavascript(script, null) }
+    }
 
     // ─── Fragment lifecycle ───────────────────────────────────────────────────
 
@@ -158,6 +188,7 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
                     val progression = locator.locations.totalProgression ?: 0.0
                     val position = locator.locations.position ?: 0
                     viewListener?.onLocationChanged(locator, position, positionCount, progression)
+                    injectInsetCss()
                 }
             }
         }

@@ -55,6 +55,7 @@ export default function ReaderScreen() {
   const [currentPosition, setCurrentPosition]   = useState(0);
   const [error,           setError]             = useState<string | null>(null);
   const [command,         setCommand]           = useState('');
+  const [headerHeight,    setHeaderHeight]       = useState(insets.top + 52);
 
   // ─── Persistence ───────────────────────────────────────────────────────────
 
@@ -124,7 +125,7 @@ export default function ReaderScreen() {
     <View style={styles.container}>
       <Stack.Screen options={{ headerShown: false }} />
 
-      {/* Full-screen reader — no layout flex, always fills entire container */}
+      {/* Full-screen reader — fills entire container, always behind overlays */}
       {isLoading ? (
         <View style={styles.centered}>
           <ActivityIndicator color="#6D6D6D" />
@@ -136,6 +137,7 @@ export default function ReaderScreen() {
           initialLocator={savedLocator ?? undefined}
           preferences={JSON.stringify(DEFAULT_PREFERENCES)}
           command={command}
+          contentInsetTop={headerHeight}
           onBukReady={handleReady}
           onBukLocation={handleLocation}
           onBukTap={handleTap}
@@ -143,9 +145,12 @@ export default function ReaderScreen() {
         />
       )}
 
-      {/* Controls — absolute overlays, don't affect BukReadiumView layout */}
+      {/* Controls — absolute overlays on top of BukReadiumView */}
       {controlsVisible && (
-        <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) }]}>
+        <View
+          style={[styles.header, { paddingTop: Math.max(insets.top, 12) }]}
+          onLayout={(e) => setHeaderHeight(e.nativeEvent.layout.height)}
+        >
           <Pressable style={styles.headerBack} onPress={() => router.back()}>
             <Feather name="chevron-left" size={24} color="#FFF" />
           </Pressable>
