@@ -1,13 +1,14 @@
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Dimensions, LayoutChangeEvent, Pressable, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Feather } from '@expo/vector-icons';
+import { ActivityIndicator, Dimensions, LayoutChangeEvent, StyleSheet, View } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import { isPdfPageImageExtractorAvailable } from '@/services/pdf-page-image-extractor';
 import { usePdfRasterizer } from '@/hooks/use-pdf-rasterizer';
 import { usePageSwipe } from '@/hooks/use-page-swipe';
 import PageStrip from '@/components/page-strip';
+import { ReaderLayout } from '@/components/reader-ui/reader-layout';
+import { useReaderPrefs } from '@/hooks/use-reader-prefs';
+import { READER_THEMES } from '@/constants/reader-theme';
 
 const getAsyncStorage = () => {
   try {
@@ -27,9 +28,12 @@ export default function PdfReaderNativeScreen() {
 
   const resolvedFileUri = fileUri ? String(fileUri) : '';
   const resolvedBookId = bookId ? String(bookId) : '';
-  const insets = useSafeAreaInsets();
+  const resolvedTitle = title ? String(title) : 'PDF Reader';
+
   const AsyncStorage = getAsyncStorage();
   const progressKey = resolvedBookId && AsyncStorage ? `pdf-progress:${resolvedBookId}` : '';
+
+  const { prefs, updatePrefs, isLoaded: prefsLoaded } = useReaderPrefs();
 
   const [controlsVisible, setControlsVisible] = useState(true);
   const [currentPage, setCurrentPage] = useState(1);
@@ -189,41 +193,39 @@ export default function PdfReaderNativeScreen() {
     }
   }, []);
 
-  if (!resolvedFileUri || !uriReady) {
+  const isLoading = !resolvedFileUri || !uriReady || !prefsLoaded;
+  const theme = prefsLoaded ? READER_THEMES[prefs.themeId] : null;
+
+  if (isLoading || !theme) {
     return (
-      <View style={styles.container}>
+      <View style={styles.centered}>
         <ActivityIndicator color="#6D6D6D" />
       </View>
     );
   }
 
+  const paginationText = totalPages > 0 ? `${currentPage} / ${totalPages}` : '';
+  const progressPercent = totalPages > 0 ? currentPage / totalPages : 0;
+
   return (
-    <View style={styles.container}>
+    <ReaderLayout
+      prefs={prefs}
+      updatePrefs={updatePrefs}
+      title={resolvedTitle}
+      progressPercent={progressPercent}
+      paginationText={paginationText}
+      controlsVisible={controlsVisible}
+      onCloseSettings={() => setControlsVisible(true)}
+    >
       <Stack.Screen options={{ headerShown: false }} />
 
-      {controlsVisible && (
-        <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) }]}>
-          <Pressable onPress={() => router.back()} style={styles.backButton}>
-            <Feather name="chevron-left" size={24} color="#FFF" />
-          </Pressable>
-          <Text style={styles.headerTitle} numberOfLines={1}>
-            {title ? String(title) : 'PDF Reader'}
-          </Text>
-          <View style={styles.headerSpacer} />
-        </View>
-      )}
-
-      <View
-        style={styles.pdfWrapper}
-        onLayout={handleLayout}
-      >
+      <View style={styles.pdfWrapper} onLayout={handleLayout}>
         {extractorAvailable ? (
           // Extractor path (Android)
           <View style={styles.nativeStack}>
-            <View style={styles.pageBackdrop} />
+            <View style={[styles.pageBackdrop, { backgroundColor: theme.bg }]} />
 
-            {/* Hidden Pdf: mounted only until page count is known.
-                Invisible to the user  fires onLoadComplete as fallback page counter. */}
+            {/* Hidden Pdf: mounted only until page count is known. */}
             {!pageCountReady && Pdf ? (
               <View style={[StyleSheet.absoluteFill, styles.hiddenLayer]}>
                 <Pdf
@@ -259,83 +261,49 @@ export default function PdfReaderNativeScreen() {
                 <View style={styles.gestureOverlay} {...panHandlers} />
               </>
             ) : (
-              <View style={styles.loadingOverlay}>
-                <ActivityIndicator color="#6D6D6D" />
+              <View style={[styles.loadingOverlay, { backgroundColor: theme.bg }]}>
+                <ActivityIndicator color={theme.label} />
               </View>
             )}
           </View>
         ) : Pdf ? (
-          <Pdf
-            key={`native-${activePdfUri}-${currentPage}`}
-            source={{ uri: activePdfUri, cache: false }}
-            style={styles.fill}
-            page={Math.max(1, currentPage)}
-            singlePage={true}
-            horizontal={false}
-            enablePaging={false}
-            scrollEnabled={false}
-            spacing={0}
-            onLoadComplete={(pages: number) => {
-              if (pages > 0) { setTotalPages(pages); setPageCountReady(true); }
-            }}
-            onError={() => setPageCountReady(true)}
-            renderActivityIndicator={() => <ActivityIndicator size="small" color="#6D6D6D" />}
-          />
+          // Fallback native path
+          <>
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: theme.bg }]} />
+            <Pdf
+              key={`native-${activePdfUri}-${currentPage}`}
+              source={{ uri: activePdfUri, cache: false }}
+              style={[styles.fill, { backgroundColor: theme.bg }]}
+              page={Math.max(1, currentPage)}
+              singlePage={true}
+              horizontal={false}
+              enablePaging={false}
+              scrollEnabled={false}
+              spacing={0}
+              onLoadComplete={(pages: number) => {
+                if (pages > 0) { setTotalPages(pages); setPageCountReady(true); }
+              }}
+              onError={() => setPageCountReady(true)}
+              renderActivityIndicator={() => <ActivityIndicator size="small" color={theme.label} />}
+            />
+            {/* Overlay gesture for tap to turn pages / toggle controls if needed in fallback */}
+            <View style={styles.gestureOverlay} {...panHandlers} />
+          </>
         ) : null}
       </View>
-
-      {controlsVisible && (
-        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
-          <Text style={styles.pageIndicator}>
-            Page {currentPage}{totalPages > 0 ? ` of ${totalPages}` : ''}
-          </Text>
-        </View>
-      )}
-    </View>
+    </ReaderLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  centered: {
     flex: 1,
-    backgroundColor: '#725c5c',
-  },
-  header: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 10,
-    backgroundColor: 'rgba(0, 0, 0, 0.85)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  backButton: {
-    width: 40,
-    height: 40,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
-  },
-  headerTitle: {
-    flex: 1,
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  headerSpacer: {
-    width: 40,
+    backgroundColor: '#000',
   },
   pdfWrapper: {
     flex: 1,
-  },
-  fill: {
-    flex: 1,
-    backgroundColor: '#705959',
   },
   nativeStack: {
     flex: 1,
@@ -344,7 +312,10 @@ const styles = StyleSheet.create({
   },
   pageBackdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#856a6a',
+  },
+  fill: {
+    flex: 1,
+    backgroundColor: 'transparent',
   },
   hiddenLayer: {
     opacity: 0,
@@ -359,23 +330,5 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#000',
-  },
-  footer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
-    zIndex: 10,
-    backgroundColor: 'rgba(0, 0, 0, 0.85)',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    alignItems: 'center',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  pageIndicator: {
-    color: '#9BA1A6',
-    fontSize: 13,
   },
 });

@@ -1,12 +1,13 @@
 import { buildWebPdfViewerHtml } from '@/assets/pdfjs/viewer-web';
 import { Stack, useRouter, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, StyleSheet, View, Pressable, Text } from 'react-native';
+import { ActivityIndicator, StyleSheet, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { Asset } from 'expo-asset';
 import * as FileSystem from 'expo-file-system/legacy';
-import { Feather } from '@expo/vector-icons';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { ReaderLayout } from '@/components/reader-ui/reader-layout';
+import { useReaderPrefs } from '@/hooks/use-reader-prefs';
+import { READER_THEMES } from '@/constants/reader-theme';
 
 export default function PdfReaderScreen() {
   const router = useRouter();
@@ -16,6 +17,9 @@ export default function PdfReaderScreen() {
   }>();
 
   const resolvedFileUri = fileUri ? String(fileUri) : '';
+  const resolvedTitle = title ? String(title) : 'PDF Reader';
+
+  const { prefs, updatePrefs, isLoaded: prefsLoaded } = useReaderPrefs();
 
   const [base64, setBase64] = useState<string | null>(null);
   const [base64State, setBase64State] = useState<'loading' | 'ready' | 'too_large' | 'error'>('loading');
@@ -25,7 +29,6 @@ export default function PdfReaderScreen() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(0);
   const webViewRef = React.useRef<WebView>(null);
-  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     let cancelled = false;
@@ -55,8 +58,6 @@ export default function PdfReaderScreen() {
     };
   }, []);
   
-
-
   useEffect(() => {
     let cancelled = false;
 
@@ -74,7 +75,6 @@ export default function PdfReaderScreen() {
           info && info.exists && typeof (info as any).size === 'number' ? (info as any).size : undefined;
 
         // Keep it lightweight: refuse very large PDFs for base64.
-        // You can raise this later if needed.
         const MAX_BYTES = 30 * 1024 * 1024; // 30MB
         if (size && size > MAX_BYTES) {
           if (!cancelled) setBase64State('too_large');
@@ -85,7 +85,6 @@ export default function PdfReaderScreen() {
         if (!cancelled) {
           setBase64(b64);
           setBase64State('ready');
-          console.log('[PdfReader] base64 loaded bytes:', size ?? 'unknown', 'chars:', b64.length);
         }
       } catch {
         if (!cancelled) setBase64State('error');
@@ -107,7 +106,6 @@ export default function PdfReaderScreen() {
     
     pageUpdateTimeoutRef.current = setTimeout(() => {
       if (webViewRef.current) {
-        console.log('[PdfReader] Going to page:', currentPage);
         webViewRef.current.postMessage(JSON.stringify({ 
           type: 'SET_CURRENT_PAGE', 
           page: currentPage
@@ -125,53 +123,44 @@ export default function PdfReaderScreen() {
     [resolvedFileUri, base64, base64State, pdfJsCode]
   );
 
-  if (!resolvedFileUri) {
-    return (
-      <View style={styles.container}>
-        <ActivityIndicator color="#6D6D6D" />
-      </View>
-    );
-  }
+  const isLoading = !resolvedFileUri || pdfJsState === 'loading' || !prefsLoaded ||
+    (resolvedFileUri.startsWith('file://') && base64 === null && base64State === 'loading');
 
-  if (pdfJsState === 'loading') {
+  const theme = prefsLoaded ? READER_THEMES[prefs.themeId] : null;
+
+  if (isLoading || !theme) {
     return (
-      <View style={styles.container}>
-        <ActivityIndicator color="#6D6D6D" />
+      <View style={[styles.centered, theme && { backgroundColor: theme.bg }]}>
+        <ActivityIndicator color={theme?.label || '#6D6D6D'} />
       </View>
     );
   }
 
   const isFileScheme = resolvedFileUri.startsWith('file://');
-
-  if (isFileScheme && base64 === null && base64State === 'loading') {
-    return (
-      <View style={styles.container}>
-        <ActivityIndicator color="#6D6D6D" />
-      </View>
-    );
-  }
+  const paginationText = totalPages > 0 ? `${currentPage} / ${totalPages}  •  ${Math.round((currentPage / totalPages) * 100)}%` : '';
+  const progressPercent = totalPages > 0 ? currentPage / totalPages : 0;
 
   return (
-    <View style={styles.container}>
+    <ReaderLayout
+      prefs={prefs}
+      updatePrefs={updatePrefs}
+      title={resolvedTitle}
+      progressPercent={progressPercent}
+      paginationText={paginationText}
+      controlsVisible={controlsVisible}
+      onCloseSettings={() => setControlsVisible(true)}
+    >
       <Stack.Screen options={{ headerShown: false }} />
       
-      {/* Header */}
-      {controlsVisible && (
-        <View style={[styles.header, { paddingTop: Math.max(insets.top, 12) }]}>
-          <Pressable onPress={() => router.back()} style={styles.backButton}>
-            <Feather name="chevron-left" size={24} color="#FFF" />
-          </Pressable>
-          <Text style={styles.headerTitle} numberOfLines={1}>
-            {title ? String(title) : 'PDF Reader'}
-          </Text>
-          <View style={styles.headerSpacer} />
-        </View>
-      )}
-
-      {/* PDF Content */}
-      <View
-        style={styles.pdfWrapper}
-      >
+      <View style={styles.pdfWrapper}>
+        {/* Toggle controls invisibly when tapping */}
+        <View 
+          style={styles.tapOverlay} 
+          onStartShouldSetResponder={() => true}
+          onResponderRelease={() => setControlsVisible((prev) => !prev)}
+          pointerEvents="box-none"
+        />
+        
         <WebView
           ref={webViewRef}
           key={resolvedFileUri}
@@ -189,7 +178,6 @@ export default function PdfReaderScreen() {
             try {
               const data = JSON.parse(event.nativeEvent.data);
               if (data.type === 'SET_TOTAL_PAGES') {
-                console.log('[PdfReader] SET_TOTAL_PAGES message received:', data.totalPages);
                 setTotalPages(data.totalPages);
               }
             } catch (e) {
@@ -198,77 +186,27 @@ export default function PdfReaderScreen() {
           }}
         />
       </View>
-
-      {/* Footer */}
-      {controlsVisible && (
-        <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, 10) }]}>
-          <Text style={styles.pageIndicator}>
-            Page {currentPage}{totalPages > 0 ? ` of ${totalPages}  •  ${Math.round((currentPage / totalPages) * 100)}%` : ''}
-          </Text>
-        </View>
-      )}
-    </View>
+    </ReaderLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  centered: {
     flex: 1,
-    backgroundColor: '#464646',
-  },
-  header: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 10,
-    backgroundColor: 'rgba(44, 43, 43, 0.85)',
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  backButton: {
-    width: 40,
-    height: 40,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 8,
-  },
-  headerTitle: {
-    flex: 1,
-    color: '#FFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  headerSpacer: {
-    width: 40,
   },
   pdfWrapper: {
     flex: 1,
+    position: 'relative',
   },
   web: {
     flex: 1,
     backgroundColor: '#222222',
   },
-  footer: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
+  tapOverlay: {
+    ...StyleSheet.absoluteFillObject,
     zIndex: 10,
-    backgroundColor: 'rgba(0, 0, 0, 0.85)',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    alignItems: 'center',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  pageIndicator: {
-    color: '#9BA1A6',
-    fontSize: 13,
+    elevation: 10,
   },
 });
-
