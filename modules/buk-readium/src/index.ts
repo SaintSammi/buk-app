@@ -124,12 +124,37 @@ export interface BukReadiumViewProps {
 const NativeBukReadium = requireNativeModule('BukReadium');
 const BukReadiumView = requireNativeViewManager<BukReadiumViewProps>('BukReadium');
 
+export interface EpubMetadata {
+  title?: string;
+  authors?: string;
+  publisher?: string;
+  description?: string;
+  language?: string;
+  identifier?: string;
+  series?: string;
+  published?: string;
+}
+
+export interface EpubTocItem {
+  title: string;
+  href: string;
+  locator?: string;
+}
+
 /**
  * Extract the cover image from an EPUB file.
  * Returns a `file://` URI to a cached JPEG, or `null` if no cover is found.
  */
 export async function extractEpubCover(src: string): Promise<string | null> {
   return NativeBukReadium.extractEpubCover(src);
+}
+
+export async function extractEpubMetadata(src: string): Promise<EpubMetadata | null> {
+  return NativeBukReadium.extractEpubMetadata(src);
+}
+
+export async function extractEpubToc(src: string): Promise<EpubTocItem[] | null> {
+  return NativeBukReadium.extractEpubToc(src);
 }
 
 export { BukReadiumView };

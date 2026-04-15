@@ -5,6 +5,9 @@ export type Book = {
   coverUri?: string;
   fileUri?: string;
   sourceType?: 'pdf' | 'epub' | 'txt' | 'other';
+  series?: string;
+  publisher?: string;
+  description?: string;
 };
 
 export const DEFAULT_COVER_URI = 'https://covers.openlibrary.org/b/id/8231856-L.jpg';

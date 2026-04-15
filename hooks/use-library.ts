@@ -4,7 +4,7 @@ import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { extractEpubCover } from '@/modules/buk-readium/src';
+import { extractEpubCover, extractEpubMetadata } from '@/modules/buk-readium/src';
 import {
   Book,
   DEFAULT_COVER_URI,
@@ -189,23 +189,40 @@ export function useLibrary() {
     // Extract EPUB covers asynchronously after building the book list.
     // Persist to AsyncStorage AND update state so covers appear without
     // requiring a screen-focus cycle.
-    const coverExtractions = importedBooks.map(async (book) => {
+    const extractions = importedBooks.map(async (book) => {
       if (book.sourceType !== 'epub' || !book.fileUri) return;
       try {
-        const coverUri = await extractEpubCover(book.fileUri);
-        if (coverUri) {
-          await AsyncStorage.setItem(`epub-cover:${book.id}`, coverUri);
-          // Update the book in state so the card re-renders immediately
+        const [coverUri, meta] = await Promise.all([
+          extractEpubCover(book.fileUri).catch(() => null),
+          extractEpubMetadata(book.fileUri).catch(() => null)
+        ]);
+
+        if (coverUri || meta) {
+          if (coverUri) {
+            await AsyncStorage.setItem(`epub-cover:${book.id}`, coverUri);
+          }
+          
           setBooks((prev) =>
-            prev.map((b) => (b.id === book.id ? { ...b, coverUri } : b))
+            prev.map((b) => {
+              if (b.id !== book.id) return b;
+              return {
+                ...b,
+                ...(coverUri && { coverUri }),
+                ...(meta?.authors && !b.author && { author: meta.authors }),
+                ...(meta?.title && { title: meta.title }),
+                ...(meta?.series && { series: meta.series }),
+                ...(meta?.publisher && { publisher: meta.publisher }),
+                ...(meta?.description && { description: meta.description }),
+              };
+            })
           );
         }
       } catch {
-        // Non-fatal — BookCard will show the default cover
+        // Non-fatal — BookCard will show the default cover and no extra metadata
       }
     });
-    // Fire-and-forget: covers will appear as AsyncStorage is populated
-    Promise.all(coverExtractions).catch(() => {});
+    // Fire-and-forget: covers and meta will appear as state is updated
+    Promise.all(extractions).catch(() => {});
 
     // Newest imports first
     setBooks((prev) => [...importedBooks.reverse(), ...prev]);

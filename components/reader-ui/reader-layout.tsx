@@ -1,9 +1,11 @@
 import React, { useCallback, useRef, useState } from 'react';
-import { StyleSheet, Pressable, View } from 'react-native';
+import { StyleSheet, Pressable, View, Text } from 'react-native';
 import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { ReaderHeader } from './reader-header';
 import { ReaderFooter } from './reader-footer';
 import { ReaderSettings } from './reader-settings';
+import { ReaderContents } from './reader-contents';
+import type { EpubTocItem } from '@/modules/buk-readium';
 import { READER_THEMES } from '@/constants/reader-theme';
 import type { ReaderPrefs } from '@/hooks/use-reader-prefs';
 
@@ -19,6 +21,11 @@ interface ReaderLayoutProps {
   paginationText?: string;
   controlsVisible: boolean;
   onCloseSettings?: () => void;
+  bookmarks?: string[];
+  toc?: EpubTocItem[];
+  currentLocator?: string | null;
+  onAddBookmark?: (locator: string) => void;
+  onGoto?: (locator: string) => void;
 }
 
 export function ReaderLayout({
@@ -31,8 +38,14 @@ export function ReaderLayout({
   paginationText,
   controlsVisible,
   onCloseSettings,
+  bookmarks = [],
+  toc = [],
+  currentLocator,
+  onAddBookmark,
+  onGoto,
 }: ReaderLayoutProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<'settings' | 'contents'>('settings');
   const tempControlsVisibleRef = useRef(controlsVisible);
 
   // Settings Panel Animation
@@ -79,7 +92,13 @@ export function ReaderLayout({
 
       {/* ── Header ───────────────────────────────────────────────────────────── */}
       {controlsVisible && (
-        <ReaderHeader title={title} prefs={prefs} onOpenSettings={openSettings} />
+        <ReaderHeader 
+          title={title} 
+          prefs={prefs} 
+          currentLocator={currentLocator}
+          onOpenSettings={openSettings} 
+          onAddBookmark={onAddBookmark}
+        />
       )}
 
       {/* ── Footer ───────────────────────────────────────────────────────────── */}
@@ -103,10 +122,24 @@ export function ReaderLayout({
           <Animated.View
             style={[
               styles.panelWrapper,
+              { backgroundColor: theme.panelBg },
               panelAnimStyle,
             ]}
           >
-            <ReaderSettings prefs={prefs} updatePrefs={updatePrefs} />
+            <View style={styles.tabRow}>
+               <Pressable style={styles.tabBtn} onPress={() => setActiveTab('settings')}>
+                 <Text style={[styles.tabText, { color: theme.panelSubtext }, activeTab === 'settings' && { color: theme.label, fontWeight: '700' }]}>APPEARANCE</Text>
+               </Pressable>
+               <Pressable style={styles.tabBtn} onPress={() => setActiveTab('contents')}>
+                 <Text style={[styles.tabText, { color: theme.panelSubtext }, activeTab === 'contents' && { color: theme.label, fontWeight: '700' }]}>CONTENTS</Text>
+               </Pressable>
+            </View>
+
+            {activeTab === 'settings' ? (
+              <ReaderSettings prefs={prefs} updatePrefs={updatePrefs} />
+            ) : (
+              <ReaderContents toc={toc} bookmarks={bookmarks} onGoto={onGoto} prefs={prefs} />
+            )}
           </Animated.View>
         </>
       )}
@@ -136,5 +169,20 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.30,
     shadowRadius: 16,
     overflow: 'hidden',
+  },
+  tabRow: {
+    flexDirection: 'row',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: 'rgba(128,128,128,0.2)',
+  },
+  tabBtn: {
+    flex: 1,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  tabText: {
+    fontSize: 12,
+    fontWeight: '500',
+    letterSpacing: 0.8,
   },
 });

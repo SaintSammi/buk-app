@@ -9,10 +9,12 @@ import type { ReaderPrefs } from '@/hooks/use-reader-prefs';
 interface ReaderHeaderProps {
   title: string;
   prefs: ReaderPrefs;
+  currentLocator?: string | null;
   onOpenSettings: () => void;
+  onAddBookmark?: (locator: string) => void;
 }
 
-export function ReaderHeader({ title, prefs, onOpenSettings }: ReaderHeaderProps) {
+export function ReaderHeader({ title, prefs, currentLocator, onOpenSettings, onAddBookmark }: ReaderHeaderProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const theme = READER_THEMES[prefs.themeId];
@@ -36,9 +38,20 @@ export function ReaderHeader({ title, prefs, onOpenSettings }: ReaderHeaderProps
         {title}
       </Text>
 
-      <Pressable style={styles.iconBtn} onPress={onOpenSettings}>
-        <Feather name="sliders" size={19} color={theme.icon} />
-      </Pressable>
+      <View style={styles.rightActions}>
+        <Pressable 
+          style={styles.iconBtn} 
+          onPress={() => {
+            if (onAddBookmark && currentLocator) onAddBookmark(currentLocator);
+          }}
+        >
+          <Feather name="bookmark" size={19} color={theme.icon} />
+        </Pressable>
+
+        <Pressable style={styles.iconBtn} onPress={onOpenSettings}>
+          <Feather name="sliders" size={19} color={theme.icon} />
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -55,6 +68,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     paddingBottom: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  rightActions: {
+    flexDirection: 'row',
   },
   iconBtn: {
     width: 44,

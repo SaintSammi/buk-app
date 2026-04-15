@@ -2,8 +2,12 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useKeepAwake } from 'expo-keep-awake';
 import {
   BukReadiumView,
+  buildCommand,
+  extractEpubToc,
+  type EpubTocItem,
   type BukReadyEvent,
   type BukLocationEvent,
   type BukTapEvent,
@@ -17,6 +21,8 @@ import { READER_THEMES } from '@/constants/reader-theme';
 
 function locatorKey(bookId: string) { return `readium-locator:${bookId}`; }
 function progressKey(bookId: string) { return `progress-pct:${bookId}`; }
+function bookmarksKey(bookId: string) { return `readium-bookmarks:${bookId}`; }
+function statsKey(bookId: string) { return `book-stats:${bookId}`; }
 
 export default function EpubReaderScreen() {
   const router = useRouter();
@@ -43,6 +49,11 @@ export default function EpubReaderScreen() {
   const [chapterTitle, setChapterTitle] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [command, setCommand] = useState('');
+  
+  const [bookmarks, setBookmarks] = useState<string[]>([]);
+  const [toc, setToc] = useState<EpubTocItem[]>([]);
+  
+  useKeepAwake();
 
   // ─── Load locator in parallel ────────────────────────────────────
 
@@ -59,11 +70,39 @@ export default function EpubReaderScreen() {
         setPositionLoaded(true);
       })
       .catch(() => setPositionLoaded(true));
-  }, [resolvedBookId]);
 
-  useEffect(() => () => {
-    if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-  }, []);
+    AsyncStorage.getItem(bookmarksKey(resolvedBookId))
+      .then((val) => {
+        if (val) {
+          try { setBookmarks(JSON.parse(val)); } catch {}
+        }
+      });
+
+    if (resolvedUri) {
+      extractEpubToc(resolvedUri).then((res) => {
+        if (res) setToc(res);
+      });
+    }
+  }, [resolvedBookId, resolvedUri]);
+
+  useEffect(() => {
+    const sessionStart = Date.now();
+    return () => {
+      if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
+      if (resolvedBookId) {
+        const elapsed = Date.now() - sessionStart;
+        if (elapsed > 2000) {
+          AsyncStorage.getItem(statsKey(resolvedBookId)).then(val => {
+             let ms = elapsed;
+             if (val) {
+                try { ms += JSON.parse(val).sessionAccumulatedMs || 0 } catch {}
+             }
+             AsyncStorage.setItem(statsKey(resolvedBookId), JSON.stringify({ sessionAccumulatedMs: ms })).catch(()=>{});
+          });
+        }
+      }
+    };
+  }, [resolvedBookId]);
 
   // ─── Event handlers ──────────────────────────────────────────────────────
 
@@ -96,6 +135,20 @@ export default function EpubReaderScreen() {
 
   const handleError = useCallback((event: BukErrorEvent) => {
     setError(event.nativeEvent.message);
+  }, []);
+
+  const handleAddBookmark = useCallback((locator: string) => {
+    setBookmarks(prev => {
+      if (prev.includes(locator)) return prev;
+      const next = [locator, ...prev];
+      AsyncStorage.setItem(bookmarksKey(resolvedBookId), JSON.stringify(next));
+      return next;
+    });
+  }, [resolvedBookId]);
+
+  const handleGoto = useCallback((locator: string) => {
+    setCommand(buildCommand('goto', locator));
+    setControlsVisible(false);
   }, []);
 
   // ─── Derived ─────────────────────────────────────────────────────────────
@@ -131,6 +184,11 @@ export default function EpubReaderScreen() {
       paginationText={paginationText}
       controlsVisible={controlsVisible}
       onCloseSettings={() => setControlsVisible(true)}
+      currentLocator={savedLocator}
+      bookmarks={bookmarks}
+      toc={toc}
+      onAddBookmark={handleAddBookmark}
+      onGoto={handleGoto}
     >
       <Stack.Screen options={{ headerShown: false }} />
 

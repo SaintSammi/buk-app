@@ -85,6 +85,106 @@ class BukReadiumModule : Module() {
             }
         }
 
+        AsyncFunction("extractEpubMetadata") { src: String, promise: Promise ->
+            val context: Context = appContext.reactContext
+                ?: return@AsyncFunction promise.reject("E_NO_CONTEXT", "No React context", null)
+
+            moduleScope.launch {
+                try {
+                    val httpClient = DefaultHttpClient()
+                    val assetRetriever = AssetRetriever(context.contentResolver, httpClient)
+                    val opener = PublicationOpener(
+                        publicationParser = DefaultPublicationParser(
+                            context = context,
+                            httpClient = httpClient,
+                            assetRetriever = assetRetriever,
+                            pdfFactory = null
+                        )
+                    )
+
+                    val url = android.net.Uri.parse(src).toAbsoluteUrl()
+                        ?: return@launch promise.reject("E_BAD_URI", "Cannot parse URI: $src", null)
+
+                    val asset = assetRetriever.retrieve(url).getOrElse {
+                        return@launch promise.reject("E_ASSET", "Cannot retrieve asset: $it", null)
+                    }
+
+                    val publication = opener.open(asset, allowUserInteraction = false).getOrElse {
+                        asset.close()
+                        return@launch promise.reject("E_OPEN", "Cannot open publication: $it", null)
+                    }
+
+                    val metadata = mapOf(
+                        "title" to publication.metadata.title,
+                        "authors" to publication.metadata.authors.joinToString(", ") { it.name },
+                        "publisher" to publication.metadata.publishers.joinToString(", ") { it.name },
+                        "description" to publication.metadata.description,
+                        "language" to publication.metadata.languages.firstOrNull(),
+                        "identifier" to publication.metadata.identifier,
+                        "series" to publication.metadata.belongsTo["series"]?.firstOrNull()?.name,
+                        "published" to publication.metadata.published?.toString()
+                    )
+
+                    publication.close()
+                    promise.resolve(metadata)
+                } catch (e: Exception) {
+                    Log.e(TAG, "extractEpubMetadata failed", e)
+                    promise.resolve(null)
+                }
+            }
+        }
+
+        AsyncFunction("extractEpubToc") { src: String, promise: Promise ->
+            val context: Context = appContext.reactContext
+                ?: return@AsyncFunction promise.reject("E_NO_CONTEXT", "No React context", null)
+
+            moduleScope.launch {
+                try {
+                    val httpClient = DefaultHttpClient()
+                    val assetRetriever = AssetRetriever(context.contentResolver, httpClient)
+                    val opener = PublicationOpener(
+                        publicationParser = DefaultPublicationParser(
+                            context = context,
+                            httpClient = httpClient,
+                            assetRetriever = assetRetriever,
+                            pdfFactory = null
+                        )
+                    )
+
+                    val url = android.net.Uri.parse(src).toAbsoluteUrl()
+                        ?: return@launch promise.reject("E_BAD_URI", "Cannot parse URI: $src", null)
+
+                    val asset = assetRetriever.retrieve(url).getOrElse {
+                        return@launch promise.reject("E_ASSET", "Cannot retrieve asset: $it", null)
+                    }
+
+                    val publication = opener.open(asset, allowUserInteraction = false).getOrElse {
+                        asset.close()
+                        return@launch promise.reject("E_OPEN", "Cannot open publication: $it", null)
+                    }
+
+                    val toc = publication.tableOfContents.map {
+                        val locJson = org.json.JSONObject().apply {
+                            put("href", it.href.toString())
+                            put("type", "application/xhtml+xml")
+                            if (it.title != null) put("title", it.title)
+                        }.toString()
+                        mapOf(
+                            "title" to it.title,
+                            "href" to it.href.toString(),
+                            "locator" to locJson
+                        )
+                    }
+
+                    publication.close()
+                    promise.resolve(toc)
+                } catch (e: Exception) {
+                    Log.e(TAG, "extractEpubToc failed", e)
+                    promise.resolve(null)
+                }
+            }
+        }
+
         View(BukReadiumView::class) {
             Events("onBukReady", "onBukLocation", "onBukTap", "onBukError")
 

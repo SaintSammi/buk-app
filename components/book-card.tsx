@@ -10,6 +10,19 @@ function progressPctKey(bookId: string) {
   return `progress-pct:${bookId}`;
 }
 
+function statsKey(bookId: string) {
+  return `book-stats:${bookId}`;
+}
+
+function formatReadTime(ms: number) {
+  if (!ms || ms < 60000) return '';
+  const mins = Math.floor(ms / 60000);
+  if (mins < 60) return `${mins} m`;
+  const hours = Math.floor(mins / 60);
+  const remMins = mins % 60;
+  return remMins > 0 ? `${hours} h ${remMins} m` : `${hours} h`;
+}
+
 type BookCardProps = {
   book: Book;
   onPress: () => void;
@@ -18,6 +31,7 @@ type BookCardProps = {
 
 export default function BookCard({ book, onPress, onLongPress }: BookCardProps) {
   const [readProgress, setReadProgress] = useState(0);
+  const [readTimeMs, setReadTimeMs] = useState(0);
   const [cachedCoverUri, setCachedCoverUri] = useState<string | null>(null);
 
   // When book.coverUri is updated in-memory (e.g. after async extraction), clear
@@ -36,6 +50,17 @@ export default function BookCard({ book, onPress, onLongPress }: BookCardProps) 
         })
         .catch(() => {});
 
+      AsyncStorage.getItem(statsKey(book.id))
+        .then((val) => {
+          if (val) {
+            try {
+              const stats = JSON.parse(val);
+              setReadTimeMs(stats.sessionAccumulatedMs || 0);
+            } catch {}
+          }
+        })
+        .catch(() => {});
+
       if (book.sourceType !== 'pdf') {
         AsyncStorage.getItem(`epub-cover:${book.id}`)
           .then((val) => { if (val) setCachedCoverUri(val); })
@@ -43,6 +68,9 @@ export default function BookCard({ book, onPress, onLongPress }: BookCardProps) 
       }
     }, [book.id, book.sourceType])
   );
+
+  const authorText = [book.author, book.series].filter(Boolean).join(' · ');
+  const timeText = formatReadTime(readTimeMs);
 
   return (
     <Pressable style={styles.card} onPress={onPress} onLongPress={onLongPress}>
@@ -60,10 +88,17 @@ export default function BookCard({ book, onPress, onLongPress }: BookCardProps) 
         <Text style={styles.title} numberOfLines={2}>
           {book.title}
         </Text>
-        {!!book.author && (
-          <Text style={styles.author} numberOfLines={1}>
-            {book.author}
-          </Text>
+        {!!authorText && (
+          <View style={styles.metaRow}>
+            <Text style={styles.author} numberOfLines={1}>
+              {authorText}
+            </Text>
+            {!!timeText && (
+              <Text style={styles.time} numberOfLines={1}>
+                {timeText}
+              </Text>
+            )}
+          </View>
         )}
         {readProgress > 0 && (
           <View style={styles.progressTrack}>
@@ -100,12 +135,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 18,
   },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 4,
+    gap: 8,
+  },
   author: {
     color: '#6D6D6D',
     fontFamily: 'Manrope_500Medium',
     fontSize: 10,
     lineHeight: 14,
-    marginTop: 4,
+    flex: 1,
+  },
+  time: {
+    color: '#6D6D6D',
+    fontFamily: 'Manrope_500Medium',
+    fontSize: 10,
+    lineHeight: 14,
   },
   progressTrack: {
     marginTop: 8,
