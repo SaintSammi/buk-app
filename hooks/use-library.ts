@@ -87,7 +87,7 @@ export function useLibrary() {
 
       if (sourceType === 'epub') {
         router.push({
-          pathname: '/reader',
+          pathname: '/epub-reader',
           params: {
             bookId: book.id,
             title: book.title,
