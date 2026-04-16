@@ -10,6 +10,7 @@ export interface ReaderPrefs {
   fontSize: number;
   fontFamily: 'normal' | 'serif';
   lineHeight: number;
+  brightness: number;
 }
 
 export const DEFAULT_PREFS: ReaderPrefs = {
@@ -17,6 +18,7 @@ export const DEFAULT_PREFS: ReaderPrefs = {
   fontSize: 1.0,
   fontFamily: 'normal',
   lineHeight: 1.8,
+  brightness: 1.0,
 };
 
 export function prefsToReadium(p: ReaderPrefs): BukReadiumPreferences {

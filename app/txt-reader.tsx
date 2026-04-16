@@ -106,7 +106,6 @@ export default function TxtReaderScreen() {
   // Calculate approximate reading progress based on scroll
   const maxScroll = Math.max(1, contentHeight - scrollViewHeightRef.current);
   const progressPercent = Math.min(1, Math.max(0, currentScrollY / maxScroll));
-  const percentText = `${Math.round(progressPercent * 100)}%`;
 
   return (
     <ReaderLayout
@@ -114,9 +113,12 @@ export default function TxtReaderScreen() {
       updatePrefs={updatePrefs}
       title={resolvedTitle}
       progressPercent={progressPercent}
-      paginationText={percentText}
+      position={Math.round(progressPercent * 100)}
+      positionCount={100}
       controlsVisible={controlsVisible}
-      onCloseSettings={() => setControlsVisible(true)}
+      onSeek={(val) => {
+        scrollViewRef.current?.scrollTo({ y: val * maxScroll, animated: true });
+      }}
     >
       <Stack.Screen options={{ headerShown: false }} />
 

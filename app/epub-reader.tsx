@@ -152,11 +152,9 @@ export default function EpubReaderScreen() {
   }, []);
 
   // ─── Derived ─────────────────────────────────────────────────────────────
-
   const isLoading = !positionLoaded || !prefsLoaded || !resolvedUri;
   const theme = READER_THEMES[prefs.themeId];
   const readiumPrefs = JSON.stringify(prefsToReadium(prefs));
-  const paginationText = positionCount > 0 ? `${currentPosition} / ${positionCount}` : '';
 
   // ─── Error screen ─────────────────────────────────────────────────────────
 
@@ -179,16 +177,16 @@ export default function EpubReaderScreen() {
       prefs={prefs}
       updatePrefs={updatePrefs}
       title={resolvedTitle}
-      chapterTitle={chapterTitle}
       progressPercent={progression}
-      paginationText={paginationText}
+      position={currentPosition}
+      positionCount={positionCount}
       controlsVisible={controlsVisible}
-      onCloseSettings={() => setControlsVisible(true)}
       currentLocator={savedLocator}
       bookmarks={bookmarks}
       toc={toc}
       onAddBookmark={handleAddBookmark}
       onGoto={handleGoto}
+      onSeek={(val) => setCommand(buildCommand('goto', JSON.stringify({ locations: { progression: val } })))}
     >
       <Stack.Screen options={{ headerShown: false }} />
 

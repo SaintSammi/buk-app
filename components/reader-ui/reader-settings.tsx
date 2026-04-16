@@ -4,6 +4,7 @@ import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ReaderThemeId, READER_THEMES } from '@/constants/reader-theme';
 import type { ReaderPrefs } from '@/hooks/use-reader-prefs';
+import { ReaderSlider } from './reader-slider';
 
 interface ReaderSettingsProps {
   prefs: ReaderPrefs;
@@ -15,113 +16,82 @@ export function ReaderSettings({ prefs, updatePrefs }: ReaderSettingsProps) {
   const theme = READER_THEMES[prefs.themeId];
 
   return (
-    <View
-      style={[
-        styles.panel,
-        { backgroundColor: theme.panelBg, paddingBottom: Math.max(insets.bottom, 20) },
-      ]}
-    >
-      <View style={[styles.panelHandle, { backgroundColor: theme.border }]} />
+    <View style={[styles.panel, { paddingBottom: Math.max(insets.bottom, 24) + 120 }]}>
+      {/* 120 padding bottom accounts for the floating controls layout overlapping */}
 
-      <Text style={[styles.sectionTitle, { color: theme.panelSubtext }]}>APPEARANCE</Text>
-      <View style={styles.pillRow}>
-        {(['night', 'day', 'sepia'] as ReaderThemeId[]).map((id) => (
-          <Pressable
-            key={id}
-            style={[
-              styles.pill,
-              prefs.themeId === id
-                ? { backgroundColor: theme.pillActive }
-                : { backgroundColor: READER_THEMES[id].bg, borderColor: theme.border, borderWidth: 1 },
-            ]}
-            onPress={() => updatePrefs({ themeId: id })}
-          >
-            <Text
-              style={[
-                styles.pillText,
-                { color: prefs.themeId === id ? theme.pillActiveFg : READER_THEMES[id].text },
-              ]}
-            >
-              {id === 'night' ? 'Night' : id === 'day' ? 'Day' : 'Sepia'}
-            </Text>
-          </Pressable>
-        ))}
+      {/* Font Size Slider */}
+      <View style={styles.sliderRow}>
+        <ReaderSlider
+          value={prefs.fontSize}
+          min={0.8}
+          max={2.0}
+          steps={5}
+          onChange={(val) => updatePrefs({ fontSize: val })}
+          activeColor={theme.accent}
+          inactiveColor={theme.border}
+          dotColor={theme.panelBg}
+          leftIcon={<Text style={[styles.sliderIconText, { color: theme.icon, fontSize: 13, fontWeight: '700' }]}>A</Text>}
+          rightIcon={<Text style={[styles.sliderIconText, { color: theme.icon, fontSize: 18, fontWeight: '700' }]}>A</Text>}
+        />
       </View>
 
-      <Text style={[styles.sectionTitle, { color: theme.panelSubtext }]}>FONT SIZE</Text>
-      <View style={styles.stepRow}>
+      {/* Brightness Slider */}
+      <View style={styles.sliderRow}>
+        <ReaderSlider
+          value={prefs.brightness}
+          min={0.0}
+          max={1.0}
+          steps={5}
+          onChange={(val) => updatePrefs({ brightness: val })}
+          activeColor={theme.accent}
+          inactiveColor={theme.border}
+          dotColor={theme.panelBg}
+          leftIcon={<Feather name="sun" size={16} color={theme.icon} />}
+          rightIcon={<Feather name="sun" size={22} color={theme.icon} />}
+        />
+      </View>
+
+      {/* Theme Selectors */}
+      <View style={styles.themeRow}>
         <Pressable
-          style={[styles.stepBtn, { borderColor: theme.border }]}
-          onPress={() => updatePrefs({ fontSize: Math.max(0.8, +(prefs.fontSize - 0.1).toFixed(1)) })}
+          style={[
+            styles.themeBtn,
+            { backgroundColor: '#121212' },
+            prefs.themeId === 'night' && styles.themeBtnActive,
+            prefs.themeId === 'night' && { borderColor: theme.accent },
+          ]}
+          onPress={() => updatePrefs({ themeId: 'night' })}
         >
-          <Feather name="minus" size={18} color={theme.icon} />
+          <Text style={[styles.themeBtnText, { color: '#FFFFFF' }]}>Aa</Text>
         </Pressable>
-        <Text style={[styles.stepValue, { color: theme.panelText }]}>
-          {prefs.fontSize.toFixed(1)}×
-        </Text>
+
         <Pressable
-          style={[styles.stepBtn, { borderColor: theme.border }]}
-          onPress={() => updatePrefs({ fontSize: Math.min(2.0, +(prefs.fontSize + 0.1).toFixed(1)) })}
+          style={[
+            styles.themeBtn,
+            { backgroundColor: '#444444' }, // Dark grey
+            prefs.themeId === 'day' && styles.themeBtnActive, // Wait! Is 'day' white or dark grey?
+            // Actually, in the screenshot, the center is maybe a dark mode contrast. Let's make Day = White, Night = Dark, Sepia = Beige.
+            // In the user's design, maybe Day mode has a custom black button? Let's just use White, Black, Sepia colors mapping to standard themes.
+            { backgroundColor: '#ECEDEE' }, // Day Theme
+            prefs.themeId === 'day' && styles.themeBtnActive,
+            prefs.themeId === 'day' && { borderColor: theme.accent },
+          ]}
+          onPress={() => updatePrefs({ themeId: 'day' })}
         >
-          <Feather name="plus" size={18} color={theme.icon} />
+          <Text style={[styles.themeBtnText, { color: '#121212' }]}>Aa</Text>
         </Pressable>
-      </View>
 
-      <Text style={[styles.sectionTitle, { color: theme.panelSubtext }]}>FONT</Text>
-      <View style={styles.pillRow}>
-        {(['normal', 'serif'] as const).map((fam) => (
-          <Pressable
-            key={fam}
-            style={[
-              styles.pill,
-              prefs.fontFamily === fam
-                ? { backgroundColor: theme.pillActive }
-                : { backgroundColor: 'transparent', borderColor: theme.border, borderWidth: 1 },
-            ]}
-            onPress={() => updatePrefs({ fontFamily: fam })}
-          >
-            <Text
-              style={[
-                styles.pillText,
-                {
-                  color: prefs.fontFamily === fam ? theme.pillActiveFg : theme.panelText,
-                  fontFamily: fam === 'serif' ? 'serif' : undefined,
-                },
-              ]}
-            >
-              {fam === 'serif' ? 'Serif' : 'Default'}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-
-      <Text style={[styles.sectionTitle, { color: theme.panelSubtext }]}>LINE SPACING</Text>
-      <View style={styles.pillRow}>
-        {([
-          { label: 'Compact', value: 1.4 },
-          { label: 'Normal', value: 1.8 },
-          { label: 'Relaxed', value: 2.2 },
-        ] as const).map(({ label, value }) => (
-          <Pressable
-            key={label}
-            style={[
-              styles.pill,
-              prefs.lineHeight === value
-                ? { backgroundColor: theme.pillActive }
-                : { backgroundColor: 'transparent', borderColor: theme.border, borderWidth: 1 },
-            ]}
-            onPress={() => updatePrefs({ lineHeight: value })}
-          >
-            <Text
-              style={[
-                styles.pillText,
-                { color: prefs.lineHeight === value ? theme.pillActiveFg : theme.panelText },
-              ]}
-            >
-              {label}
-            </Text>
-          </Pressable>
-        ))}
+        <Pressable
+          style={[
+            styles.themeBtn,
+            { backgroundColor: '#F5D6B6' },
+            prefs.themeId === 'sepia' && styles.themeBtnActive,
+            prefs.themeId === 'sepia' && { borderColor: theme.accent },
+          ]}
+          onPress={() => updatePrefs({ themeId: 'sepia' })}
+        >
+          <Text style={[styles.themeBtnText, { color: '#433422' }]}>Aa</Text>
+        </Pressable>
       </View>
     </View>
   );
@@ -129,55 +99,36 @@ export function ReaderSettings({ prefs, updatePrefs }: ReaderSettingsProps) {
 
 const styles = StyleSheet.create({
   panel: {
-    paddingTop: 12,
-    paddingHorizontal: 20,
+    paddingHorizontal: 24,
+    paddingTop: 16,
   },
-  panelHandle: {
-    width: 36,
-    height: 4,
-    borderRadius: 2,
-    alignSelf: 'center',
-    marginBottom: 22,
+  sliderRow: {
+    marginBottom: 24,
   },
-  sectionTitle: {
-    fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.9,
-    marginBottom: 10,
+  sliderIconText: {
+    textAlign: 'center',
   },
-  pillRow: {
+  themeRow: {
     flexDirection: 'row',
-    gap: 8,
-    marginBottom: 22,
+    justifyContent: 'space-between',
+    gap: 16,
+    marginBottom: 16,
   },
-  pill: {
+  themeBtn: {
     flex: 1,
-    paddingVertical: 11,
-    borderRadius: 12,
-    alignItems: 'center',
-  },
-  pillText: {
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  stepRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 22,
-    paddingHorizontal: 8,
-  },
-  stepBtn: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    borderWidth: StyleSheet.hairlineWidth,
+    height: 56,
+    borderRadius: 28,
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 2,
+    borderColor: 'transparent',
   },
-  stepValue: {
-    flex: 1,
-    textAlign: 'center',
-    fontSize: 17,
-    fontWeight: '500',
+  themeBtnActive: {
+    borderWidth: 2,
+  },
+  themeBtnText: {
+    fontSize: 18,
+    fontWeight: '600',
+    fontFamily: 'serif', // A nice serif for 'Aa' aesthetics
   },
 });

@@ -204,7 +204,6 @@ export default function PdfReaderNativeScreen() {
     );
   }
 
-  const paginationText = totalPages > 0 ? `${currentPage} / ${totalPages}` : '';
   const progressPercent = totalPages > 0 ? currentPage / totalPages : 0;
 
   return (
@@ -213,9 +212,14 @@ export default function PdfReaderNativeScreen() {
       updatePrefs={updatePrefs}
       title={resolvedTitle}
       progressPercent={progressPercent}
-      paginationText={paginationText}
+      position={currentPage}
+      positionCount={totalPages}
       controlsVisible={controlsVisible}
-      onCloseSettings={() => setControlsVisible(true)}
+      onSeek={(val) => {
+        if (totalPages > 0) {
+          handlePageCommit(Math.max(1, Math.min(totalPages, Math.round(val * totalPages))));
+        }
+      }}
     >
       <Stack.Screen options={{ headerShown: false }} />
 
