@@ -2,6 +2,7 @@ export type ReaderThemeId = 'night' | 'day' | 'sepia';
 
 export interface ReaderThemeColors {
   bg: string;
+  bgTransparent: string;
   text: string;
   controlsBg: string;
   border: string;
@@ -18,6 +19,7 @@ export interface ReaderThemeColors {
 export const READER_THEMES: Record<ReaderThemeId, ReaderThemeColors> = {
   night: {
     bg: '#121212',
+    bgTransparent: 'rgba(18, 18, 18, 0)',
     text: '#ECEDEE',
     controlsBg: 'rgba(18, 18, 18, 0.4)',
     border: 'rgba(255, 255, 255, 0.10)',
@@ -32,6 +34,7 @@ export const READER_THEMES: Record<ReaderThemeId, ReaderThemeColors> = {
   },
   day: {
     bg: '#F2F2F2',
+    bgTransparent: 'rgba(242, 242, 242, 0)',
     text: '#121212',
     controlsBg: 'rgba(242, 242, 242, 0.4)',
     border: 'rgba(0, 0, 0, 0.08)',
@@ -46,6 +49,7 @@ export const READER_THEMES: Record<ReaderThemeId, ReaderThemeColors> = {
   },
   sepia: {
     bg: '#F5ECE3',
+    bgTransparent: 'rgba(245, 236, 227, 0)',
     text: '#433422',
     controlsBg: 'rgba(245, 236, 227, 0.4)',
     border: 'rgba(67, 52, 34, 0.12)',

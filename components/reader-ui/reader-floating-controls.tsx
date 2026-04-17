@@ -30,13 +30,12 @@ export function ReaderFloatingControls({
 
   return (
     <View style={[styles.container, { height: 120 + insets.bottom }]}>
-      {/* ── Background: Blur + Gradient ────────────────────────────────────── */}
-      <BlurView intensity={20} style={StyleSheet.absoluteFillObject} tint={prefs.themeId === 'night' ? 'dark' : 'light'} />
+      {/* ── Background: Gradient ────────────────────────────────────────────── */}
       <LinearGradient
-        colors={gradientColors}
-        style={StyleSheet.absoluteFillObject}
-        start={{ x: 0, y: 0.2 }}
-        end={{ x: 0, y: 1 }}
+        colors={[theme.bgTransparent, theme.bg, theme.bg]}
+        style={[StyleSheet.absoluteFillObject, { top: -60 }]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 0.5 }}
       />
 
       {/* ── UI Elements ──────────────────────────────────────────────────────── */}

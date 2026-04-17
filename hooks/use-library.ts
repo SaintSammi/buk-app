@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { useCallback, useEffect, useState } from 'react';
 import { Alert } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Asset } from 'expo-asset';
 import { extractEpubCover, extractEpubMetadata } from '@/modules/buk-readium/src';
 import {
   Book,
@@ -28,12 +29,44 @@ export function useLibrary() {
 
     async function loadBooks() {
       try {
-        const savedBooks = await AsyncStorage.getItem(STORAGE_KEY);
+        let savedBooks = await AsyncStorage.getItem(STORAGE_KEY);
+        
+        // Auto-migrate: check if the old fake books are in storage and purge them
+        if (savedBooks && savedBooks.includes('"id":"1"') && savedBooks.includes('Pride and Prejudice')) {
+          savedBooks = null;
+          await AsyncStorage.removeItem(STORAGE_KEY);
+        }
+
         if (!cancelled) {
-          if (savedBooks) {
+          if (savedBooks && savedBooks !== '[]') {
             setBooks(JSON.parse(savedBooks));
+            setIsLoading(false);
+          } else if (!savedBooks) {
+            // First time launch: resolve assets to file references
+            const resolvedBooks = await Promise.all(
+              defaultBooks.map(async (book) => {
+                if (book.assetModule) {
+                  try {
+                    const asset = Asset.fromModule(book.assetModule);
+                    await asset.downloadAsync();
+                    return { ...book, fileUri: asset.localUri || asset.uri };
+                  } catch (e) {
+                    console.warn(`Failed to resolve asset for ${book.title}`);
+                  }
+                }
+                return book;
+              })
+            );
+            
+            if (!cancelled) {
+              setBooks(resolvedBooks);
+              AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(resolvedBooks));
+              setIsLoading(false);
+            }
+          } else {
+            setBooks([]);
+            setIsLoading(false);
           }
-          setIsLoading(false);
         }
       } catch {
         if (!cancelled) setIsLoading(false);

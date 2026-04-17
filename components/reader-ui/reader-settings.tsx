@@ -53,44 +53,40 @@ export function ReaderSettings({ prefs, updatePrefs }: ReaderSettingsProps) {
 
       {/* Theme Selectors */}
       <View style={styles.themeRow}>
+        {/* Day Theme */}
         <Pressable
           style={[
             styles.themeBtn,
-            { backgroundColor: '#121212' },
-            prefs.themeId === 'night' && styles.themeBtnActive,
-            prefs.themeId === 'night' && { borderColor: theme.accent },
-          ]}
-          onPress={() => updatePrefs({ themeId: 'night' })}
-        >
-          <Text style={[styles.themeBtnText, { color: '#FFFFFF' }]}>Aa</Text>
-        </Pressable>
-
-        <Pressable
-          style={[
-            styles.themeBtn,
-            { backgroundColor: '#444444' }, // Dark grey
-            prefs.themeId === 'day' && styles.themeBtnActive, // Wait! Is 'day' white or dark grey?
-            // Actually, in the screenshot, the center is maybe a dark mode contrast. Let's make Day = White, Night = Dark, Sepia = Beige.
-            // In the user's design, maybe Day mode has a custom black button? Let's just use White, Black, Sepia colors mapping to standard themes.
-            { backgroundColor: '#ECEDEE' }, // Day Theme
+            { backgroundColor: '#FFFFFF', borderColor: '#E5E5E5', borderWidth: 1 },
             prefs.themeId === 'day' && styles.themeBtnActive,
-            prefs.themeId === 'day' && { borderColor: theme.accent },
           ]}
           onPress={() => updatePrefs({ themeId: 'day' })}
         >
           <Text style={[styles.themeBtnText, { color: '#121212' }]}>Aa</Text>
         </Pressable>
 
+        {/* Night Theme */}
         <Pressable
           style={[
             styles.themeBtn,
-            { backgroundColor: '#F5D6B6' },
+            { backgroundColor: '#2B2B2B', borderColor: '#2B2B2B', borderWidth: 1 },
+            prefs.themeId === 'night' && { borderColor: '#E5E5E5', borderWidth: 2 },
+          ]}
+          onPress={() => updatePrefs({ themeId: 'night' })}
+        >
+          <Text style={[styles.themeBtnText, { color: '#FFFFFF' }]}>Aa</Text>
+        </Pressable>
+
+        {/* Sepia Theme */}
+        <Pressable
+          style={[
+            styles.themeBtn,
+            { backgroundColor: '#FAD8B7', borderColor: '#FAD8B7', borderWidth: 1 },
             prefs.themeId === 'sepia' && styles.themeBtnActive,
-            prefs.themeId === 'sepia' && { borderColor: theme.accent },
           ]}
           onPress={() => updatePrefs({ themeId: 'sepia' })}
         >
-          <Text style={[styles.themeBtnText, { color: '#433422' }]}>Aa</Text>
+          <Text style={[styles.themeBtnText, { color: '#4A3B29' }]}>Aa</Text>
         </Pressable>
       </View>
     </View>
@@ -120,11 +116,11 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 2,
-    borderColor: 'transparent',
+    borderWidth: 1,
   },
   themeBtnActive: {
     borderWidth: 2,
+    borderColor: '#121212',
   },
   themeBtnText: {
     fontSize: 18,
