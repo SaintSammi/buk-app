@@ -121,7 +121,10 @@ export function ReaderLayout({
       <Animated.View
         style={[
           styles.panelWrapper,
-          { backgroundColor: theme.panelBg },
+          { 
+            backgroundColor: theme.panelBg,
+            bottom: Math.max(insets.bottom, 32) + 48 + 24, // 32 pad + 48 pill + 24 gap
+          },
           panelAnimStyle,
         ]}
       >
@@ -199,12 +202,10 @@ const styles = StyleSheet.create({
   },
   panelWrapper: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
+    left: 24,
+    right: 24,
     zIndex: 30, // Important: Below zIndex: 40 of FloatingControls!
-    borderTopLeftRadius: 32,
-    borderTopRightRadius: 32,
+    borderRadius: 32,
     elevation: 24,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -6 },

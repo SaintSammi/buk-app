@@ -16,8 +16,8 @@ export function ReaderSettings({ prefs, updatePrefs }: ReaderSettingsProps) {
   const theme = READER_THEMES[prefs.themeId];
 
   return (
-    <View style={[styles.panel, { paddingBottom: Math.max(insets.bottom, 24) + 120 }]}>
-      {/* 120 padding bottom accounts for the floating controls layout overlapping */}
+    <View style={[styles.panel, { paddingBottom: 24 }]}>
+      {/* Settings inputs */}
 
       {/* Font Size Slider */}
       <View style={styles.sliderRow}>

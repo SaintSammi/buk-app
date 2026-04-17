@@ -33,7 +33,7 @@ export function ReaderContents({
   const theme = READER_THEMES[prefs.themeId];
 
   return (
-    <View style={[styles.panel, { paddingBottom: Math.max(insets.bottom, 24) + 120 }]}>
+    <View style={[styles.panel, { paddingBottom: 24 }]}>
       
       {/* Header Info */}
       <View style={styles.headerInfo}>

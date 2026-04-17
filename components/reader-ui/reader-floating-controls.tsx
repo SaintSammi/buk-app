@@ -25,56 +25,75 @@ export function ReaderFloatingControls({
   const insets = useSafeAreaInsets();
   const theme = READER_THEMES[prefs.themeId];
 
-  // We want the gradient to fade to the exact background of the theme.
-  const gradientColors = ['transparent', theme.bg];
+  // We want the gradient height to be 120 (48 pill + 32 paddingBottom + 40 paddingTop)
+  // For safety with notches, we add the bottom inset.
+  const gradientHeight = 120 + insets.bottom;
 
   return (
-    <View style={[styles.container, { height: 120 + insets.bottom }]}>
+    <View style={[styles.container, { height: gradientHeight }]}>
       {/* ── Background: Gradient ────────────────────────────────────────────── */}
-      <LinearGradient
-        colors={[theme.bgTransparent, theme.bg, theme.bg]}
-        style={[StyleSheet.absoluteFillObject, { top: -60 }]}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 0, y: 0.5 }}
-      />
+      {activeTab === 'none' && (
+        <LinearGradient
+          colors={[theme.bgTransparent, theme.bg]}
+          style={StyleSheet.absoluteFillObject}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 0, y: 1 }}
+        />
+      )}
 
       {/* ── UI Elements ──────────────────────────────────────────────────────── */}
-      <View style={[styles.inner, { paddingBottom: Math.max(insets.bottom, 24) }]}>
+      <View style={[styles.inner, { bottom: Math.max(insets.bottom, 32) }]}>
         
         {/* Bookmark */}
-        <Pressable 
-          style={[styles.iconButton, { backgroundColor: '#E5E5E5' }]}
-          onPress={() => {
-            if (onAddBookmark && currentLocator) onAddBookmark(currentLocator);
-          }}
-        >
-          <Feather name="bookmark" size={20} color="#121212" />
-        </Pressable>
+        <View style={[styles.iconButton, { overflow: 'hidden', backgroundColor: 'transparent' }]}>
+          <BlurView 
+            intensity={60} 
+            tint={theme.bg === '#121212' ? 'dark' : 'light'} 
+            experimentalBlurMethod="dimezisBlurView"
+            style={StyleSheet.absoluteFillObject} 
+          />
+          <Pressable 
+            style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(15, 15, 15, 0.15)', justifyContent: 'center', alignItems: 'center' }]}
+            onPress={() => {
+              if (onAddBookmark && currentLocator) onAddBookmark(currentLocator);
+            }}
+          >
+            <Feather name="bookmark" size={20} color="#121212" />
+          </Pressable>
+        </View>
 
         {/* Segmented Pill */}
-        <View style={[styles.segmentedPill, { backgroundColor: '#E5E5E5' }]}>
+        <View style={[styles.segmentedPill, { overflow: 'hidden', backgroundColor: 'transparent' }]}>
+          <BlurView 
+            intensity={60} 
+            tint={theme.bg === '#121212' ? 'dark' : 'light'} 
+            experimentalBlurMethod="dimezisBlurView"
+            style={StyleSheet.absoluteFillObject} 
+          />
+          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(15, 15, 15, 0.15)' }]} />
+          
           <Pressable 
-            style={[styles.segmentBtn, activeTab === 'contents' && { backgroundColor: '#121212' }]}
+            style={[styles.segmentBtn, activeTab === 'contents' && styles.segmentBtnActive]}
             onPress={() => onTabPress('contents')}
           >
-            <Text style={[styles.segmentText, { color: activeTab === 'contents' ? '#FFFFFF' : '#687076' }]}>
+            <Text style={[styles.segmentText, { color: activeTab === 'contents' ? '#FFFFFF' : '#121212' }]}>
               Content
             </Text>
           </Pressable>
           
           <Pressable 
-            style={[styles.segmentBtn, activeTab === 'settings' && { backgroundColor: '#121212' }]}
+            style={[styles.segmentBtn, activeTab === 'settings' && styles.segmentBtnActive]}
             onPress={() => onTabPress('settings')}
           >
-            <Text style={[styles.segmentText, { color: activeTab === 'settings' ? '#FFFFFF' : '#687076' }]}>
+            <Text style={[styles.segmentText, { color: activeTab === 'settings' ? '#FFFFFF' : '#121212' }]}>
               Theme
             </Text>
           </Pressable>
         </View>
 
-        {/* Search Placeholder */}
+        {/* Search */}
         <Pressable 
-          style={[styles.iconButton, { backgroundColor: '#121212' }]}
+          style={[styles.iconButton, { backgroundColor: '#0F0F0F' }]}
           onPress={() => Alert.alert("Search", "Search functionality coming soon!")}
         >
           <Feather name="search" size={20} color="#FFFFFF" />
@@ -94,6 +113,9 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   inner: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -114,7 +136,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     height: 48,
     borderRadius: 24,
-    padding: 4,
     flex: 1,
     marginHorizontal: 16,
     shadowColor: '#000',
@@ -124,9 +145,12 @@ const styles = StyleSheet.create({
   },
   segmentBtn: {
     flex: 1,
-    borderRadius: 20,
+    borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  segmentBtnActive: {
+    backgroundColor: '#0F0F0F',
   },
   segmentText: {
     fontSize: 14,

@@ -102,6 +102,7 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
 
     // Props buffered before the navigator is ready
     private var pendingInitialLocator: String? = null
+    private var pendingPreferences: org.readium.r2.navigator.epub.EpubPreferences? = null
     private var pendingSrc: String? = null
     private var lastCommandId: Double = Double.MIN_VALUE
     private var cleanupRunnable: Runnable? = null
@@ -210,7 +211,8 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
         hostFragment?.setContentInsetTopPx(px)
     }
 
-    fun applyPreferences(json: String?) {        if (json.isNullOrEmpty()) return
+    fun applyPreferences(json: String?) {
+        if (json.isNullOrEmpty()) return
         try {
             val obj = JSONObject(json)
             val prefs = EpubPreferences(
@@ -223,7 +225,13 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
                     ?.let { FontFamily(it) },
                 lineHeight = if (obj.has("lineHeight")) obj.optDouble("lineHeight").takeIf { !it.isNaN() } else null
             )
-            hostFragment?.submitPreferences(prefs)
+            
+            val host = hostFragment
+            if (host == null) {
+                pendingPreferences = prefs
+            } else {
+                host.submitPreferences(prefs)
+            }
         } catch (e: Exception) {
             Log.w(TAG, "applyPreferences: failed to parse or apply", e)
         }
@@ -294,6 +302,7 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
             it.publication = publication
             it.navigatorFactory = factory
             it.viewListener = makeListener()
+            pendingPreferences?.let { p -> it.initialPreferences = p }
         }
 
         attachFragment(fragment)

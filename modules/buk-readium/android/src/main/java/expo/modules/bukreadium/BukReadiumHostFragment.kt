@@ -55,6 +55,7 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
     // Supplied by caller before calling supportFragmentManager.commit
     lateinit var publication: Publication
     lateinit var navigatorFactory: EpubNavigatorFactory
+    var initialPreferences: EpubPreferences? = null
 
     // Set after the child fragment is attached
     private var navigator: EpubNavigatorFragment? = null
@@ -109,6 +110,7 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
             childFragmentManager.fragmentFactory =
                 navigatorFactory.createFragmentFactory(
                     initialLocator = initialLocator,
+                    initialPreferences = initialPreferences ?: EpubPreferences(),
                     listener = this
                 )
             Log.i(TAG, "onCreate: fragmentFactory set OK")
