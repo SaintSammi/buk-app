@@ -12,11 +12,10 @@ interface ReaderSettingsProps {
 }
 
 export function ReaderSettings({ prefs, updatePrefs }: ReaderSettingsProps) {
-  const insets = useSafeAreaInsets();
   const theme = READER_THEMES[prefs.themeId];
 
   return (
-    <View style={[styles.panel, { paddingBottom: 24 }]}>
+    <View style={styles.panel}>
       {/* Settings inputs */}
 
       {/* Font Size Slider */}
@@ -96,7 +95,7 @@ export function ReaderSettings({ prefs, updatePrefs }: ReaderSettingsProps) {
 const styles = StyleSheet.create({
   panel: {
     paddingHorizontal: 24,
-    paddingTop: 16,
+    paddingVertical: 24,
   },
   sliderRow: {
     marginBottom: 24,

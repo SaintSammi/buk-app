@@ -1,104 +1,204 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { StyleSheet, View, Pressable, Text, Alert } from 'react-native';
+import Animated, { 
+  FadeIn, 
+  FadeOut, 
+  LinearTransition, 
+  useAnimatedStyle, 
+  useSharedValue, 
+  withTiming,
+  Easing
+} from 'react-native-reanimated';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
-import { READER_THEMES } from '@/constants/reader-theme';
+import { ReaderThemeId, READER_THEMES } from '@/constants/reader-theme';
 import type { ReaderPrefs } from '@/hooks/use-reader-prefs';
+import { ReaderSettings } from './reader-settings';
+import { ReaderContents } from './reader-contents';
+import type { EpubTocItem } from '@/modules/buk-readium';
 
 interface ReaderFloatingControlsProps {
   prefs: ReaderPrefs;
+  updatePrefs: (patch: Partial<ReaderPrefs>) => void;
   activeTab: 'none' | 'contents' | 'settings';
   onTabPress: (tab: 'contents' | 'settings') => void;
   onAddBookmark?: (locator: string) => void;
   currentLocator?: string | null;
+  // Panel props
+  title: string;
+  author?: string;
+  toc?: EpubTocItem[];
+  progressPercent: number;
+  position: number;
+  positionCount: number;
+  onSeek?: (progression: number) => void;
+  onGoto?: (locator: string) => void;
+}
+
+function getGradientColors(bgHex: string): string[] {
+  let r = 255, g = 255, b = 255;
+  if (bgHex.toUpperCase() === '#0F0F0F') {
+    r = 15; g = 15; b = 15;
+  } else if (bgHex.toUpperCase() === '#F5ECE3') {
+    r = 245; g = 236; b = 227;
+  }
+  return [
+    `rgba(${r}, ${g}, ${b}, 0)`,
+    `rgba(${r}, ${g}, ${b}, 0.75)`,
+    `rgba(${r}, ${g}, ${b}, 0.96)`,
+    `rgba(${r}, ${g}, ${b}, 0.99)`,
+    `rgba(${r}, ${g}, ${b}, 1)`
+  ];
 }
 
 export function ReaderFloatingControls({
   prefs,
+  updatePrefs,
   activeTab,
   onTabPress,
   onAddBookmark,
   currentLocator,
+  title,
+  author,
+  toc = [],
+  progressPercent,
+  position,
+  positionCount,
+  onSeek,
+  onGoto,
 }: ReaderFloatingControlsProps) {
   const insets = useSafeAreaInsets();
   const theme = READER_THEMES[prefs.themeId];
 
-  // We want the gradient height to be 120 (48 pill + 32 paddingBottom + 40 paddingTop)
-  // For safety with notches, we add the bottom inset.
-  const gradientHeight = 120 + insets.bottom;
+  const gradientStops = getGradientColors(theme.bg);
+
+  // Selector Animation
+  const tabX = useSharedValue(activeTab === 'settings' ? 1 : 0);
+  const prevTabRef = useRef(activeTab);
+
+  useEffect(() => {
+    const targetX = activeTab === 'settings' ? 1 : 0;
+    
+    // Only animate if we are switching BETWEEN the two active tabs (not coming from 'none')
+    if (prevTabRef.current !== 'none' && activeTab !== 'none' && prevTabRef.current !== activeTab) {
+      tabX.value = withTiming(targetX, { 
+        duration: 250, 
+        easing: Easing.bezier(0.33, 1, 0.68, 1) 
+      });
+    } else {
+      tabX.value = targetX;
+    }
+    
+    prevTabRef.current = activeTab;
+  }, [activeTab]);
+
+  const indicatorStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: tabX.value * 100 + '%' }], 
+    opacity: activeTab === 'none' ? 0 : 1,
+  }));
 
   return (
-    <View style={[styles.container, { height: gradientHeight }]}>
+    <View style={styles.container} pointerEvents="box-none">
       {/* ── Background: Gradient ────────────────────────────────────────────── */}
-      {activeTab === 'none' && (
-        <LinearGradient
-          colors={[theme.bgTransparent, theme.bg]}
-          style={StyleSheet.absoluteFillObject}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 0, y: 1 }}
-        />
-      )}
+      <LinearGradient
+        colors={gradientStops}
+        locations={[0, 0.3462, 0.476, 0.6154, 1]}
+        style={StyleSheet.absoluteFillObject}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 1 }}
+        pointerEvents="none"
+      />
 
-      {/* ── UI Elements ──────────────────────────────────────────────────────── */}
-      <View style={[styles.inner, { bottom: Math.max(insets.bottom, 32) }]}>
+      {/* ── UI Elements Frame ────────────────────────────────────────────────── */}
+      <Animated.View 
+        layout={LinearTransition}
+        style={[styles.unifiedFrame, { paddingBottom: Math.max(insets.bottom, 32) }]} 
+        pointerEvents="box-none"
+      >
         
-        {/* Bookmark */}
-        <View style={[styles.iconButton, { overflow: 'hidden', backgroundColor: 'transparent' }]}>
-          <BlurView 
-            intensity={60} 
-            tint={theme.bg === '#121212' ? 'dark' : 'light'} 
-            experimentalBlurMethod="dimezisBlurView"
-            style={StyleSheet.absoluteFillObject} 
-          />
+        {/* Menu/Panel Area */}
+        {activeTab === 'settings' && (
+          <Animated.View 
+            entering={FadeIn.duration(200)} 
+            exiting={FadeOut.duration(200)}
+            style={[styles.panelCard, { backgroundColor: theme.panelBg }]}
+          >
+            <ReaderSettings prefs={prefs} updatePrefs={updatePrefs} />
+          </Animated.View>
+        )}
+        {activeTab === 'contents' && (
+          <Animated.View 
+            entering={FadeIn.duration(200)} 
+            exiting={FadeOut.duration(200)}
+            style={[styles.panelCard, { backgroundColor: theme.panelBg }]}
+          >
+            <ReaderContents 
+              title={title} 
+              author={author} 
+              toc={toc} 
+              onGoto={onGoto} 
+              prefs={prefs} 
+              progressPercent={progressPercent}
+              position={position}
+              positionCount={positionCount}
+              onSeek={onSeek}
+            />
+          </Animated.View>
+        )}
+
+        {/* Pills Row */}
+        <View style={styles.pillsRow} pointerEvents="box-none">
+          {/* Bookmark */}
           <Pressable 
-            style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(15, 15, 15, 0.15)', justifyContent: 'center', alignItems: 'center' }]}
+            style={[styles.iconButton, { backgroundColor: theme.controlsBg }]}
             onPress={() => {
               if (onAddBookmark && currentLocator) onAddBookmark(currentLocator);
             }}
           >
-            <Feather name="bookmark" size={20} color="#121212" />
+            <Feather name="bookmark" size={20} color={theme.icon} />
+          </Pressable>
+
+          {/* Segmented Pill */}
+          <View style={[styles.segmentedPill, { backgroundColor: theme.controlsBg }]}>
+            {/* Sliding Indicator */}
+            <Animated.View 
+              style={[
+                styles.activeIndicator, 
+                { backgroundColor: theme.pillActive },
+                indicatorStyle
+              ]} 
+            />
+
+            <Pressable 
+              style={styles.segmentBtn}
+              onPress={() => onTabPress('contents')}
+            >
+              <Text style={[styles.segmentText, { color: activeTab === 'contents' ? theme.pillActiveFg : theme.icon }]}>
+                Content
+              </Text>
+            </Pressable>
+            
+            <Pressable 
+              style={styles.segmentBtn}
+              onPress={() => onTabPress('settings')}
+            >
+              <Text style={[styles.segmentText, { color: activeTab === 'settings' ? theme.pillActiveFg : theme.icon }]}>
+                Theme
+              </Text>
+            </Pressable>
+          </View>
+
+          {/* Search */}
+          <Pressable 
+            style={[styles.iconButton, { backgroundColor: theme.pillActive }]}
+            onPress={() => Alert.alert("Search", "Search functionality coming soon!")}
+          >
+            <Feather name="search" size={20} color={theme.pillActiveFg} />
           </Pressable>
         </View>
 
-        {/* Segmented Pill */}
-        <View style={[styles.segmentedPill, { overflow: 'hidden', backgroundColor: 'transparent' }]}>
-          <BlurView 
-            intensity={60} 
-            tint={theme.bg === '#121212' ? 'dark' : 'light'} 
-            experimentalBlurMethod="dimezisBlurView"
-            style={StyleSheet.absoluteFillObject} 
-          />
-          <View style={[StyleSheet.absoluteFillObject, { backgroundColor: 'rgba(15, 15, 15, 0.15)' }]} />
-          
-          <Pressable 
-            style={[styles.segmentBtn, activeTab === 'contents' && styles.segmentBtnActive]}
-            onPress={() => onTabPress('contents')}
-          >
-            <Text style={[styles.segmentText, { color: activeTab === 'contents' ? '#FFFFFF' : '#121212' }]}>
-              Content
-            </Text>
-          </Pressable>
-          
-          <Pressable 
-            style={[styles.segmentBtn, activeTab === 'settings' && styles.segmentBtnActive]}
-            onPress={() => onTabPress('settings')}
-          >
-            <Text style={[styles.segmentText, { color: activeTab === 'settings' ? '#FFFFFF' : '#121212' }]}>
-              Theme
-            </Text>
-          </Pressable>
-        </View>
-
-        {/* Search */}
-        <Pressable 
-          style={[styles.iconButton, { backgroundColor: '#0F0F0F' }]}
-          onPress={() => Alert.alert("Search", "Search functionality coming soon!")}
-        >
-          <Feather name="search" size={20} color="#FFFFFF" />
-        </Pressable>
-      </View>
+      </Animated.View>
     </View>
   );
 }
@@ -110,16 +210,28 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 40,
-    justifyContent: 'flex-end',
   },
-  inner: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
+  unifiedFrame: {
+    width: '100%',
+    paddingTop: 32,
+    paddingHorizontal: 12,
+    flexDirection: 'column',
+    alignItems: 'stretch',
+    gap: 12,
+  },
+  panelCard: {
+    borderRadius: 32,
+    overflow: 'hidden',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+  },
+  pillsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 24,
   },
   iconButton: {
     width: 48,
@@ -137,20 +249,26 @@ const styles = StyleSheet.create({
     height: 48,
     borderRadius: 24,
     flex: 1,
-    marginHorizontal: 16,
+    marginHorizontal: 12,
     shadowColor: '#000',
     shadowOpacity: 0.05,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
+    position: 'relative',
+    overflow: 'hidden',
+  },
+  activeIndicator: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    width: '50%',
+    borderRadius: 24,
   },
   segmentBtn: {
     flex: 1,
     borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  segmentBtnActive: {
-    backgroundColor: '#0F0F0F',
   },
   segmentText: {
     fontSize: 14,

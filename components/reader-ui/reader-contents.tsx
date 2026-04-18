@@ -29,11 +29,10 @@ export function ReaderContents({
   onGoto,
   onSeek,
 }: ReaderContentsProps) {
-  const insets = useSafeAreaInsets();
   const theme = READER_THEMES[prefs.themeId];
 
   return (
-    <View style={[styles.panel, { paddingBottom: 24 }]}>
+    <View style={styles.panel}>
       
       {/* Header Info */}
       <View style={styles.headerInfo}>
@@ -75,10 +74,8 @@ export function ReaderContents({
 
 const styles = StyleSheet.create({
   panel: {
-    flex: 1,
-    paddingTop: 24,
+    paddingVertical: 24,
     paddingHorizontal: 24,
-    minHeight: 300,
   },
   headerInfo: {
     marginBottom: 24,

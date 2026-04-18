@@ -40,7 +40,7 @@ export default function EpubReaderScreen() {
 
   const { prefs, updatePrefs, isLoaded: prefsLoaded } = useReaderPrefs();
 
-  const [controlsVisible, setControlsVisible] = useState(true);
+  const [controlsVisible, setControlsVisible] = useState(false);
   const [savedLocator, setSavedLocator] = useState<string | null>(null);
   const [positionLoaded, setPositionLoaded] = useState(false);
   const [positionCount, setPositionCount] = useState(0);

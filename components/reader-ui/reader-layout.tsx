@@ -4,15 +4,10 @@ import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withTiming
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { ReaderSettings } from './reader-settings';
-import { ReaderContents } from './reader-contents';
 import { ReaderFloatingControls } from './reader-floating-controls';
 import type { EpubTocItem } from '@/modules/buk-readium';
 import { READER_THEMES } from '@/constants/reader-theme';
 import type { ReaderPrefs } from '@/hooks/use-reader-prefs';
-
-const PANEL_HEIGHT = 500; 
-
 interface ReaderLayoutProps {
   children: React.ReactNode;
   prefs: ReaderPrefs;
@@ -52,35 +47,21 @@ export function ReaderLayout({
   const insets = useSafeAreaInsets();
   const [activeTab, setActiveTab] = useState<'none' | 'contents' | 'settings'>('none');
   
-  // Settings Panel Animation
-  const panelY = useSharedValue(PANEL_HEIGHT);
   const backdropAlpha = useSharedValue(0);
-
-  const panelAnimStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: panelY.value }],
-  }));
 
   const backdropAnimStyle = useAnimatedStyle(() => ({
     opacity: backdropAlpha.value,
     pointerEvents: backdropAlpha.value === 0 ? 'none' : 'auto',
   }));
-
   const openPanel = useCallback((tab: 'contents' | 'settings') => {
     setActiveTab(tab);
-    panelY.value = withTiming(0, { duration: 300, easing: Easing.out(Easing.cubic) });
     backdropAlpha.value = withTiming(1, { duration: 250 });
-  }, [panelY, backdropAlpha]);
-
-  const doClosePanel = useCallback(() => {
-    setActiveTab('none');
-  }, []);
+  }, [backdropAlpha]);
 
   const closePanel = useCallback(() => {
-    panelY.value = withTiming(PANEL_HEIGHT, { duration: 250, easing: Easing.in(Easing.cubic) }, (finished) => {
-      if (finished) runOnJS(doClosePanel)();
-    });
+    setActiveTab('none');
     backdropAlpha.value = withTiming(0, { duration: 200 });
-  }, [panelY, backdropAlpha, doClosePanel]);
+  }, [backdropAlpha]);
 
   const handleTabPress = useCallback((tab: 'contents' | 'settings') => {
     if (activeTab === tab) {
@@ -96,6 +77,11 @@ export function ReaderLayout({
     <View style={[styles.container, { backgroundColor: theme.bg }]}>
       {/* ── Content ───────────────────────────────────────────────────────────── */}
       {children}
+
+      {/* ── Settings backdrop ───────────────────────────────────────────────── */}
+      <Animated.View style={[StyleSheet.absoluteFillObject, styles.backdrop, backdropAnimStyle]}>
+        <Pressable style={StyleSheet.absoluteFillObject} onPress={closePanel} />
+      </Animated.View>
 
       {/* ── Floating Top Header (Minimal) ────────────────────────────────────── */}
       {controlsVisible && (
@@ -113,46 +99,23 @@ export function ReaderLayout({
         </Text>
       </View>
 
-      {/* ── Settings backdrop + panel ─────────────────────────────────────────── */}
-      <Animated.View style={[StyleSheet.absoluteFillObject, styles.backdrop, backdropAnimStyle]}>
-        <Pressable style={StyleSheet.absoluteFillObject} onPress={closePanel} />
-      </Animated.View>
-
-      <Animated.View
-        style={[
-          styles.panelWrapper,
-          { 
-            backgroundColor: theme.panelBg,
-            bottom: Math.max(insets.bottom, 32) + 48 + 24, // 32 pad + 48 pill + 24 gap
-          },
-          panelAnimStyle,
-        ]}
-      >
-        {activeTab === 'settings' ? (
-          <ReaderSettings prefs={prefs} updatePrefs={updatePrefs} />
-        ) : activeTab === 'contents' ? (
-          <ReaderContents 
-             title={title} 
-             author={author} 
-             toc={toc} 
-             onGoto={onGoto} 
-             prefs={prefs} 
-             progressPercent={progressPercent}
-             position={position}
-             positionCount={positionCount}
-             onSeek={onSeek}
-          />
-        ) : null}
-      </Animated.View>
-
       {/* ── Floating Controls Overlay ────────────────────────────────────── */}
       {controlsVisible && (
         <ReaderFloatingControls 
            prefs={prefs}
+           updatePrefs={updatePrefs}
            activeTab={activeTab}
            onTabPress={handleTabPress}
            onAddBookmark={onAddBookmark}
            currentLocator={currentLocator}
+           title={title}
+           author={author}
+           toc={toc}
+           progressPercent={progressPercent}
+           position={position}
+           positionCount={positionCount}
+           onSeek={onSeek}
+           onGoto={onGoto}
         />
       )}
     </View>
