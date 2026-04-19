@@ -103,7 +103,7 @@ export function ReaderSlider({
   }));
 
   const thumbStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: progressX.value - (hideThumb ? 0 : 8) }],
+    transform: [{ translateX: progressX.value - 10 }],
   }));
 
   // Render dots
@@ -153,9 +153,7 @@ export function ReaderSlider({
                 { backgroundColor: activeColor },
                 thumbStyle,
               ]}
-            >
-              <View style={styles.thumbInner} />
-            </Animated.View>
+            />
           )}
         </View>
       </GestureDetector>
@@ -169,7 +167,6 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    height: 48,
   },
   iconContainer: {
     width: 32,
@@ -178,9 +175,8 @@ const styles = StyleSheet.create({
   },
   trackWrapper: {
     flex: 1,
-    height: 48,
     justifyContent: 'center',
-    marginHorizontal: 8,
+    marginHorizontal: 0,
   },
   track: {
     width: '100%',
@@ -204,21 +200,13 @@ const styles = StyleSheet.create({
   },
   thumb: {
     position: 'absolute',
-    width: 16,
-    height: 16,
-    borderRadius: 8,
+    width: 20,
+    height: 8,
+    borderRadius: 4,
     justifyContent: 'center',
     alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 3,
-    elevation: 4,
   },
   thumbInner: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#fff',
+    display: 'none',
   },
 });

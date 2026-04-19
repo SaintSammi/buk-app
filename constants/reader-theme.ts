@@ -36,7 +36,7 @@ export const READER_THEMES: Record<ReaderThemeId, ReaderThemeColors> = {
     bg: '#FFFFFF',
     bgTransparent: 'rgba(255, 255, 255, 0)',
     text: '#0F0F0F',
-    controlsBg: '#D5D3D3',
+    controlsBg: '#F4F4F4',
     border: 'rgba(0, 0, 0, 0.08)',
     icon: '#0F0F0F',
     label: '#0F0F0F',

@@ -1,6 +1,7 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, Pressable, View, Text } from 'react-native';
 import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import * as Brightness from 'expo-brightness';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,7 +19,8 @@ interface ReaderLayoutProps {
   position: number;
   positionCount: number;
   controlsVisible: boolean;
-  bookmarks?: string[];
+  isBookmarked?: boolean;
+  bookmarkCount?: number;
   toc?: EpubTocItem[];
   currentLocator?: string | null;
   onAddBookmark?: (locator: string) => void;
@@ -36,7 +38,8 @@ export function ReaderLayout({
   position,
   positionCount,
   controlsVisible,
-  bookmarks = [],
+  isBookmarked = false,
+  bookmarkCount = 0,
   toc = [],
   currentLocator,
   onAddBookmark,
@@ -73,6 +76,26 @@ export function ReaderLayout({
 
   const theme = READER_THEMES[prefs.themeId];
 
+  // ── Screen brightness ────────────────────────────────────────────────────────
+  const originalBrightnessRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    Brightness.getBrightnessAsync()
+      .then((val) => { if (!cancelled) originalBrightnessRef.current = val; })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      if (originalBrightnessRef.current !== null) {
+        Brightness.setBrightnessAsync(originalBrightnessRef.current).catch(() => {});
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    Brightness.setBrightnessAsync(prefs.brightness).catch(() => {});
+  }, [prefs.brightness]);
+
   return (
     <View style={[styles.container, { backgroundColor: theme.bg }]}>
       {/* ── Content ───────────────────────────────────────────────────────────── */}
@@ -108,6 +131,8 @@ export function ReaderLayout({
            onTabPress={handleTabPress}
            onAddBookmark={onAddBookmark}
            currentLocator={currentLocator}
+           isBookmarked={isBookmarked}
+           bookmarkCount={bookmarkCount}
            title={title}
            author={author}
            toc={toc}

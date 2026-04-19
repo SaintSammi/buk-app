@@ -24,16 +24,28 @@ function progressKey(bookId: string) { return `progress-pct:${bookId}`; }
 function bookmarksKey(bookId: string) { return `readium-bookmarks:${bookId}`; }
 function statsKey(bookId: string) { return `book-stats:${bookId}`; }
 
+/** Stable ID for bookmark comparison — href + position, ignores JSON serialisation differences */
+function stableLocatorId(locatorJson: string): string {
+  try {
+    const { href, locations } = JSON.parse(locatorJson);
+    return `${href}::${locations?.position ?? locations?.progression ?? ''}`;
+  } catch {
+    return locatorJson;
+  }
+}
+
 export default function EpubReaderScreen() {
   const router = useRouter();
-  const { bookId, title, fileUri } = useLocalSearchParams<{
+  const { bookId, title, author, fileUri } = useLocalSearchParams<{
     bookId?: string;
     title?: string;
+    author?: string;
     fileUri?: string;
   }>();
 
   const resolvedBookId = bookId ? String(bookId) : '';
   const resolvedTitle = title ? String(title) : 'EPUB Reader';
+  const resolvedAuthor = author ? String(author) : '';
   const resolvedUri = fileUri ? String(fileUri) : '';
 
   // ─── State ─────────────────────────────────────────────────────────────────
@@ -52,6 +64,7 @@ export default function EpubReaderScreen() {
   
   const [bookmarks, setBookmarks] = useState<string[]>([]);
   const [toc, setToc] = useState<EpubTocItem[]>([]);
+  const [currentLocator, setCurrentLocator] = useState<string | null>(null);
   
   useKeepAwake();
 
@@ -114,6 +127,7 @@ export default function EpubReaderScreen() {
     const { locator, position, positionCount: total, progression: prog } = event.nativeEvent;
     setCurrentPosition(position);
     setProgression(prog);
+    setCurrentLocator(locator);
     if (total > 0) setPositionCount(total);
 
     try {
@@ -138,9 +152,11 @@ export default function EpubReaderScreen() {
   }, []);
 
   const handleAddBookmark = useCallback((locator: string) => {
+    const id = stableLocatorId(locator);
     setBookmarks(prev => {
-      if (prev.includes(locator)) return prev;
-      const next = [locator, ...prev];
+      const next = prev.some(b => stableLocatorId(b) === id)
+        ? prev.filter(b => stableLocatorId(b) !== id)
+        : [locator, ...prev];
       AsyncStorage.setItem(bookmarksKey(resolvedBookId), JSON.stringify(next));
       return next;
     });
@@ -177,13 +193,20 @@ export default function EpubReaderScreen() {
       prefs={prefs}
       updatePrefs={updatePrefs}
       title={resolvedTitle}
+      author={resolvedAuthor}
       progressPercent={progression}
       position={currentPosition}
       positionCount={positionCount}
       controlsVisible={controlsVisible}
-      currentLocator={savedLocator}
-      bookmarks={bookmarks}
+      currentLocator={currentLocator ?? savedLocator}
+      isBookmarked={(() => {
+        const loc = currentLocator ?? savedLocator;
+        if (!loc) return false;
+        const id = stableLocatorId(loc);
+        return bookmarks.some(b => stableLocatorId(b) === id);
+      })()}
       toc={toc}
+      bookmarkCount={bookmarks.length}
       onAddBookmark={handleAddBookmark}
       onGoto={handleGoto}
       onSeek={(val) => setCommand(buildCommand('goto', JSON.stringify({ locations: { progression: val } })))}

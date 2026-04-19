@@ -101,12 +101,6 @@ export interface BukReadiumViewProps {
    */
   command?: string;
 
-  /**
-   * Top inset in logical dp — pushes the Readium content area down so text
-   * starts below the header overlay without shrinking the view's frame.
-   */
-  contentInsetTop?: number;
-
   /** Fired once when the publication is opened and positions are ready */
   onBukReady?: (event: BukReadyEvent) => void;
 

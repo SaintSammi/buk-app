@@ -9,7 +9,7 @@ import Animated, {
   withTiming,
   Easing
 } from 'react-native-reanimated';
-import { Feather } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { LinearGradient } from 'expo-linear-gradient';
 import { ReaderThemeId, READER_THEMES } from '@/constants/reader-theme';
@@ -25,6 +25,8 @@ interface ReaderFloatingControlsProps {
   onTabPress: (tab: 'contents' | 'settings') => void;
   onAddBookmark?: (locator: string) => void;
   currentLocator?: string | null;
+  isBookmarked?: boolean;
+  bookmarkCount?: number;
   // Panel props
   title: string;
   author?: string;
@@ -59,6 +61,8 @@ export function ReaderFloatingControls({
   onTabPress,
   onAddBookmark,
   currentLocator,
+  isBookmarked = false,
+  bookmarkCount = 0,
   title,
   author,
   toc = [],
@@ -137,6 +141,7 @@ export function ReaderFloatingControls({
               title={title} 
               author={author} 
               toc={toc} 
+              bookmarkCount={bookmarkCount}
               onGoto={onGoto} 
               prefs={prefs} 
               progressPercent={progressPercent}
@@ -156,7 +161,12 @@ export function ReaderFloatingControls({
               if (onAddBookmark && currentLocator) onAddBookmark(currentLocator);
             }}
           >
-            <Feather name="bookmark" size={20} color={theme.icon} />
+            <Image
+              source={require('@/assets/icons/bookmark.svg')}
+              style={styles.iconImg}
+              tintColor={isBookmarked ? '#FF3131' : '#BEBEBE'}
+              contentFit="contain"
+            />
           </Pressable>
 
           {/* Segmented Pill */}
@@ -194,7 +204,12 @@ export function ReaderFloatingControls({
             style={[styles.iconButton, { backgroundColor: theme.pillActive }]}
             onPress={() => Alert.alert("Search", "Search functionality coming soon!")}
           >
-            <Feather name="search" size={20} color={theme.pillActiveFg} />
+            <Image
+              source={require('@/assets/icons/search.svg')}
+              style={styles.iconImg}
+              tintColor={theme.pillActiveFg}
+              contentFit="contain"
+            />
           </Pressable>
         </View>
 
@@ -214,19 +229,19 @@ const styles = StyleSheet.create({
   unifiedFrame: {
     width: '100%',
     paddingTop: 32,
-    paddingHorizontal: 12,
+    paddingHorizontal: 24,
     flexDirection: 'column',
     alignItems: 'stretch',
     gap: 12,
   },
   panelCard: {
-    borderRadius: 32,
+    borderRadius: 12,
     overflow: 'hidden',
-    elevation: 8,
+    elevation: 10,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.1,
-    shadowRadius: 12,
+    shadowOpacity: 0.10,
+    shadowRadius: 8,
   },
   pillsRow: {
     flexDirection: 'row',
@@ -271,7 +286,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   segmentText: {
-    fontSize: 14,
-    fontWeight: '600',
+    fontFamily: 'Manrope_700Bold',
+    fontSize: 12,
+    fontWeight: '700',
+    includeFontPadding: false,
+  },
+  iconImg: {
+    width: 24,
+    height: 24,
   },
 });
