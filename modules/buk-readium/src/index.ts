@@ -40,7 +40,7 @@ export interface BukErrorEvent {
 
 // ─── Command type ─────────────────────────────────────────────────────────────
 
-export type BukReadiumCommandType = 'next' | 'prev' | 'goto';
+export type BukReadiumCommandType = 'next' | 'prev' | 'goto' | 'gotoProgression';
 
 export interface BukReadiumCommand {
   /** Monotonically increasing id — native side deduplicates by id */
@@ -48,11 +48,16 @@ export interface BukReadiumCommand {
   type: BukReadiumCommandType;
   /** Serialised Readium Locator JSON — only required for type 'goto' */
   locator?: string;
+  /** Total progression 0.0–1.0 — only for 'gotoProgression' */
+  progression?: number;
 }
 
 /** Build a navigation command string ready for the `command` prop */
-export function buildCommand(type: BukReadiumCommandType, locator?: string): string {
-  return JSON.stringify({ id: Date.now(), type, locator } satisfies BukReadiumCommand);
+export function buildCommand(type: BukReadiumCommandType, locatorOrProgression?: string | number): string {
+  if (type === 'gotoProgression' && typeof locatorOrProgression === 'number') {
+    return JSON.stringify({ id: Date.now(), type, progression: locatorOrProgression } satisfies BukReadiumCommand);
+  }
+  return JSON.stringify({ id: Date.now(), type, locator: locatorOrProgression as string } satisfies BukReadiumCommand);
 }
 
 // ─── Preferences type ─────────────────────────────────────────────────────────

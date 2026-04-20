@@ -209,7 +209,7 @@ export default function EpubReaderScreen() {
       bookmarkCount={bookmarks.length}
       onAddBookmark={handleAddBookmark}
       onGoto={handleGoto}
-      onSeek={(val) => setCommand(buildCommand('goto', JSON.stringify({ locations: { progression: val } })))}
+      onSeek={(val) => setCommand(buildCommand('gotoProgression', val))}
     >
       <Stack.Screen options={{ headerShown: false }} />
 

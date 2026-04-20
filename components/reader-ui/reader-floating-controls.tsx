@@ -229,7 +229,7 @@ const styles = StyleSheet.create({
   unifiedFrame: {
     width: '100%',
     paddingTop: 32,
-    paddingHorizontal: 24,
+    paddingHorizontal: 12,
     flexDirection: 'column',
     alignItems: 'stretch',
     gap: 12,

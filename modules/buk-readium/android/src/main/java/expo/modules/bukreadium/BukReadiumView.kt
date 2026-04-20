@@ -200,6 +200,11 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
                     val locator = Locator.fromJSON(JSONObject(locatorJson)) ?: return
                     host.go(locator)
                 }
+                "gotoProgression" -> {
+                    val progression = obj.optDouble("progression", -1.0)
+                    if (progression < 0.0) return
+                    host.goToProgression(progression)
+                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "handleCommand: malformed JSON or navigation error", e)

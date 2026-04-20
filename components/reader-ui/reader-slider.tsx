@@ -13,6 +13,7 @@ export interface ReaderSliderProps {
   min: number;
   max: number;
   onChange: (val: number) => void;
+  onDragChange?: (val: number) => void;
   steps?: number; // Number of segments (steps - 1 dots)
   activeColor?: string;
   inactiveColor?: string;
@@ -28,6 +29,7 @@ export function ReaderSlider({
   min,
   max,
   onChange,
+  onDragChange,
   steps = 0,
   activeColor = '#121212',
   inactiveColor = '#D9D9D9',
@@ -79,13 +81,22 @@ export function ReaderSlider({
     onChange(rawVal);
   };
 
+  const notifyDragChange = (px: number) => {
+    if (!onDragChange) return;
+    let p = px / trackWidth;
+    p = Math.max(0, Math.min(1, p));
+    onDragChange(min + p * (max - min));
+  };
+
   const panGesture = Gesture.Pan()
     .onBegin((e) => {
       isDragging.value = true;
       progressX.value = e.x;
+      runOnJS(notifyDragChange)(e.x);
     })
     .onUpdate((e) => {
       progressX.value = Math.max(0, Math.min(e.x, trackWidth));
+      runOnJS(notifyDragChange)(progressX.value);
     })
     .onEnd(() => {
       isDragging.value = false;

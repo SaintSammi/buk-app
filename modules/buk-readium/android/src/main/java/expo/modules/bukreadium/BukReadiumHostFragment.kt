@@ -227,6 +227,16 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
         viewLifecycleOwner.lifecycleScope.launch { navigator?.go(locator) }
     }
 
+    fun goToProgression(totalProgression: Double) {
+        viewLifecycleOwner.lifecycleScope.launch {
+            val positions = publication.positions()
+            if (positions.isEmpty()) return@launch
+            val targetIdx = (totalProgression * (positions.size - 1)).toInt()
+                .coerceIn(0, positions.size - 1)
+            navigator?.go(positions[targetIdx])
+        }
+    }
+
     fun submitPreferences(preferences: EpubPreferences) {
         navigator?.submitPreferences(preferences)
     }

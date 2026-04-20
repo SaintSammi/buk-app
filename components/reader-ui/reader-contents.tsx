@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { StyleSheet, View, Text } from 'react-native';
 import { Image } from 'expo-image';
 import type { EpubTocItem } from '@/modules/buk-readium';
@@ -36,6 +36,12 @@ export function ReaderContents({
 }: ReaderContentsProps) {
   const theme = READER_THEMES[prefs.themeId];
   const chapterCount = toc.length;
+  const [dragging, setDragging] = useState<number | null>(null);
+
+  const displayPercent = dragging !== null ? dragging : progressPercent;
+  const displayPosition = dragging !== null
+    ? Math.max(1, Math.round(dragging * positionCount))
+    : position;
 
   return (
     <View style={styles.panel}>
@@ -58,7 +64,8 @@ export function ReaderContents({
           value={progressPercent}
           min={0.0}
           max={1.0}
-          onChange={(val) => onSeek && onSeek(val)}
+          onDragChange={(val) => setDragging(val)}
+          onChange={(val) => { setDragging(null); onSeek && onSeek(val); }}
           activeColor={theme.panelText}
           inactiveColor={theme.border}
           hideThumb={false}
@@ -66,10 +73,10 @@ export function ReaderContents({
         />
         <View style={styles.progressLabels}>
           <Text style={styles.progressText}>
-            {Math.round(progressPercent * 100)}%
+            {Math.round(displayPercent * 100)}%
           </Text>
           <Text style={styles.progressText}>
-            {positionCount > 0 ? `${position} / ${positionCount}` : ''}
+            {positionCount > 0 ? `${displayPosition} / ${positionCount}` : ''}
           </Text>
         </View>
       </View>
