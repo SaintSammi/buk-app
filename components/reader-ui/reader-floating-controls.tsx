@@ -287,7 +287,7 @@ const styles = StyleSheet.create({
   },
   segmentText: {
     fontFamily: 'Manrope_700Bold',
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '700',
     includeFontPadding: false,
   },

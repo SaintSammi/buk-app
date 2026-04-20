@@ -30,8 +30,11 @@ export function ReaderHeader({ title, prefs, currentLocator, onOpenSettings, onA
         },
       ]}
     >
-      <Pressable style={styles.iconBtn} onPress={() => router.back()}>
-        <Feather name="chevron-left" size={24} color={theme.icon} />
+      <Pressable
+        style={[styles.backBtn, { backgroundColor: theme.pillActive }]}
+        onPress={() => router.back()}
+      >
+        <Feather name="chevron-left" size={20} color={theme.pillActiveFg} />
       </Pressable>
 
       <Text style={[styles.headerTitle, { color: theme.icon }]} numberOfLines={1}>
@@ -65,12 +68,23 @@ const styles = StyleSheet.create({
     zIndex: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 4,
+    paddingHorizontal: 12,
     paddingBottom: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   rightActions: {
     flexDirection: 'row',
+  },
+  backBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.05,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
   },
   iconBtn: {
     width: 44,

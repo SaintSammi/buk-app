@@ -12,6 +12,7 @@ export interface ReaderThemeColors {
   panelBg: string;
   panelText: string;
   panelSubtext: string;
+  iconContainerBg: string;
   pillActive: string;
   pillActiveFg: string;
 }
@@ -29,6 +30,7 @@ export const READER_THEMES: Record<ReaderThemeId, ReaderThemeColors> = {
     panelBg: '#1A1A1C',
     panelText: '#FFFFFF',
     panelSubtext: '#9BA1A6',
+    iconContainerBg: '#575757',
     pillActive: '#FFFFFF',
     pillActiveFg: '#0F0F0F',
   },
@@ -44,6 +46,7 @@ export const READER_THEMES: Record<ReaderThemeId, ReaderThemeColors> = {
     panelBg: '#FFFFFF',
     panelText: '#0F0F0F',
     panelSubtext: '#687076',
+    iconContainerBg: '#F4F4F4',
     pillActive: '#0F0F0F',
     pillActiveFg: '#FFFFFF',
   },
@@ -59,6 +62,7 @@ export const READER_THEMES: Record<ReaderThemeId, ReaderThemeColors> = {
     panelBg: '#FAF5EF',
     panelText: '#433422',
     panelSubtext: '#7A6040',
+    iconContainerBg: '#EDE3D8',
     pillActive: '#0F0F0F',
     pillActiveFg: '#FFFFFF',
   },

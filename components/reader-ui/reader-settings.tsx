@@ -25,12 +25,16 @@ export function ReaderSettings({ prefs, updatePrefs }: ReaderSettingsProps) {
           min={0.8}
           max={2.0}
           steps={5}
+          height={32}
+          hideThumb={true}
           onChange={(val) => updatePrefs({ fontSize: val })}
           activeColor={theme.accent}
           inactiveColor={theme.border}
           dotColor={theme.panelBg}
-          leftIcon={<Text style={[styles.sliderIconText, { color: theme.icon, fontSize: 13, fontWeight: '700' }]}>A</Text>}
-          rightIcon={<Text style={[styles.sliderIconText, { color: theme.icon, fontSize: 18, fontWeight: '700' }]}>A</Text>}
+          activeIconColor={theme.pillActiveFg}
+          inactiveIconColor={theme.icon}
+          leftIcon={<Text style={[styles.sliderIconText, { fontSize: 13, fontWeight: '700' }]}>A</Text>}
+          rightIcon={<Text style={[styles.sliderIconText, { fontSize: 18, fontWeight: '700' }]}>A</Text>}
         />
       </View>
 
@@ -41,12 +45,16 @@ export function ReaderSettings({ prefs, updatePrefs }: ReaderSettingsProps) {
           min={0.0}
           max={1.0}
           steps={5}
+          height={32}
+          hideThumb={true}
           onChange={(val) => updatePrefs({ brightness: val })}
           activeColor={theme.accent}
           inactiveColor={theme.border}
           dotColor={theme.panelBg}
-          leftIcon={<Feather name="sun" size={16} color={theme.icon} />}
-          rightIcon={<Feather name="sun" size={22} color={theme.icon} />}
+          activeIconColor={theme.pillActiveFg}
+          inactiveIconColor={theme.icon}
+          leftIcon={<Feather name="sun" size={14} />}
+          rightIcon={<Feather name="sun" size={18} />}
         />
       </View>
 
@@ -94,12 +102,12 @@ export function ReaderSettings({ prefs, updatePrefs }: ReaderSettingsProps) {
 
 const styles = StyleSheet.create({
   panel: {
-    paddingHorizontal: 24,
-    paddingVertical: 24,
+    paddingTop: 24,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
+    gap: 32,
   },
-  sliderRow: {
-    marginBottom: 24,
-  },
+  sliderRow: {},
   sliderIconText: {
     textAlign: 'center',
   },
@@ -107,18 +115,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     gap: 16,
-    marginBottom: 16,
   },
   themeBtn: {
     flex: 1,
-    height: 56,
-    borderRadius: 28,
+    height: 48,
+    borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 1,
   },
   themeBtnActive: {
-    borderWidth: 2,
+    borderWidth: 3,
     borderColor: '#121212',
   },
   themeBtnText: {

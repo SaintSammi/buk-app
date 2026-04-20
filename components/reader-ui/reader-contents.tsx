@@ -48,11 +48,11 @@ export function ReaderContents({
       
       {/* Header Info */}
       <View style={styles.headerInfo}>
-        <Text style={styles.bookTitle} numberOfLines={2}>
+        <Text style={[styles.bookTitle, { color: theme.panelText }]} numberOfLines={2}>
           {title}
         </Text>
         {!!author && (
-          <Text style={styles.bookAuthor} numberOfLines={1}>
+          <Text style={[styles.bookAuthor, { color: theme.panelSubtext }]} numberOfLines={1}>
             {author}
           </Text>
         )}
@@ -68,39 +68,43 @@ export function ReaderContents({
           onChange={(val) => { setDragging(null); onSeek && onSeek(val); }}
           activeColor={theme.panelText}
           inactiveColor={theme.border}
+          activeIconColor={theme.panelBg}
+          inactiveIconColor={theme.panelSubtext}
           hideThumb={false}
-          height={4}
+          height={32}
+          leftIcon={
+            <Text style={styles.progressLabel}>
+              {Math.round(displayPercent * 100)}%
+            </Text>
+          }
+          rightIcon={
+            <Text style={styles.progressLabel}>
+              {positionCount > 0 ? `${displayPosition} / ${positionCount}` : ''}
+            </Text>
+          }
         />
-        <View style={styles.progressLabels}>
-          <Text style={styles.progressText}>
-            {Math.round(displayPercent * 100)}%
-          </Text>
-          <Text style={styles.progressText}>
-            {positionCount > 0 ? `${displayPosition} / ${positionCount}` : ''}
-          </Text>
-        </View>
       </View>
 
       {/* Bookmarks & Chapter Cards */}
       <View style={styles.cardsFrame}>
         <View style={styles.cardItem}>
-          <View style={styles.cardIconContainer}>
+          <View style={[styles.cardIconContainer, { backgroundColor: theme.iconContainerBg }]}>
             <Image source={bookmarkBookIcon} style={styles.cardIcon} />
           </View>
           <View style={styles.cardText}>
-            <Text style={styles.cardTitle}>Bookmarks</Text>
-            <Text style={styles.cardSubtitle}>
+            <Text style={[styles.cardTitle, { color: theme.panelText }]}>Bookmarks</Text>
+            <Text style={[styles.cardSubtitle, { color: theme.panelSubtext }]}>
               {bookmarkCount} {bookmarkCount === 1 ? 'bookmark' : 'bookmarks'}
             </Text>
           </View>
         </View>
         <View style={styles.cardItem}>
-          <View style={styles.cardIconContainer}>
+          <View style={[styles.cardIconContainer, { backgroundColor: theme.iconContainerBg }]}>
             <Image source={chapterIcon} style={styles.cardIcon} />
           </View>
           <View style={styles.cardText}>
-            <Text style={styles.cardTitle}>Chapter</Text>
-            <Text style={styles.cardSubtitle}>
+            <Text style={[styles.cardTitle, { color: theme.panelText }]}>Chapter</Text>
+            <Text style={[styles.cardSubtitle, { color: theme.panelSubtext }]}>
               {chapterCount} {chapterCount === 1 ? 'Chapter' : 'Chapters'}
             </Text>
           </View>
@@ -123,26 +127,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     fontFamily: 'Manrope_700Bold',
-    color: '#000',
   },
   bookAuthor: {
     fontSize: 10,
     fontWeight: '500',
     fontFamily: 'Manrope_700Bold',
-    color: '#6D6D6D',
   },
   progressSection: {},
-  progressLabels: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 12,
-    paddingHorizontal: 2,
-  },
-  progressText: {
-    fontSize: 10,
-    fontWeight: '400',
+  progressLabel: {
+    fontSize: 14,
     fontFamily: 'Manrope_700Bold',
-    color: '#6D6D6D',
+    fontWeight: '700',
   },
   cardsFrame: {
     flexDirection: 'row',
@@ -158,7 +153,6 @@ const styles = StyleSheet.create({
   },
   cardIconContainer: {
     borderRadius: 4,
-    backgroundColor: '#F4F4F4',
     padding: 12,
   },
   cardIcon: {
@@ -173,12 +167,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     fontFamily: 'Manrope_700Bold',
-    color: '#000',
   },
   cardSubtitle: {
     fontSize: 10,
     fontWeight: '500',
     fontFamily: 'Manrope_700Bold',
-    color: '#6D6D6D',
   },
 });

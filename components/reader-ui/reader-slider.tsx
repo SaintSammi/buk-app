@@ -1,9 +1,12 @@
-import React, { useState } from 'react';
+﻿import React, { useState } from 'react';
 import { View, StyleSheet, LayoutChangeEvent } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
+  Extrapolation,
+  interpolate,
   runOnJS,
   useAnimatedStyle,
+  useDerivedValue,
   useSharedValue,
   withTiming,
 } from 'react-native-reanimated';
@@ -14,14 +17,16 @@ export interface ReaderSliderProps {
   max: number;
   onChange: (val: number) => void;
   onDragChange?: (val: number) => void;
-  steps?: number; // Number of segments (steps - 1 dots)
+  steps?: number;
   activeColor?: string;
   inactiveColor?: string;
   dotColor?: string;
   leftIcon?: React.ReactNode;
   rightIcon?: React.ReactNode;
-  height?: number; // Height of the track
-  hideThumb?: boolean; // Progress bar doesn't use standard thumb
+  activeIconColor?: string;
+  inactiveIconColor?: string;
+  height?: number;
+  hideThumb?: boolean;
 }
 
 export function ReaderSlider({
@@ -36,12 +41,14 @@ export function ReaderSlider({
   dotColor = '#EAEAEA',
   leftIcon,
   rightIcon,
+  activeIconColor = '#FFFFFF',
+  inactiveIconColor = '#121212',
   height = 8,
   hideThumb = false,
 }: ReaderSliderProps) {
   const [trackWidth, setTrackWidth] = useState(0);
+  const trackWidthSv = useSharedValue(0);
 
-  // Math to map value to percentages
   const getPercent = (v: number) => {
     if (v <= min) return 0;
     if (v >= max) return 1;
@@ -51,39 +58,46 @@ export function ReaderSlider({
   const progressX = useSharedValue(getPercent(value) * trackWidth);
   const isDragging = useSharedValue(false);
 
-  // Sync incoming value change if not dragging
   React.useEffect(() => {
-    if (trackWidth > 0) {
-      if (!isDragging.value) {
-        progressX.value = withTiming(getPercent(value) * trackWidth, {
-          duration: 150,
-        });
-      }
+    if (trackWidth > 0 && !isDragging.value) {
+      progressX.value = withTiming(getPercent(value) * trackWidth, { duration: 150 });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value, trackWidth]);
 
   const onLayout = (e: LayoutChangeEvent) => {
-    setTrackWidth(e.nativeEvent.layout.width);
+    const w = e.nativeEvent.layout.width;
+    setTrackWidth(w);
+    trackWidthSv.value = w;
+    progressX.value = getPercent(value) * w;
   };
 
+  const OVERSHOOT = 16;
+
+  const snapPx = (px: number, tw: number): number => {
+    'worklet';
+    if (steps <= 1 || tw <= 0) return px;
+    const stepPx = tw / steps;
+    return Math.round(px / stepPx) * stepPx;
+  };
+
+  // Visual fill goes slightly past the snap point
+  const fillX = useDerivedValue(() => {
+    if (progressX.value <= 0) return 0;
+    return Math.min(trackWidthSv.value, progressX.value + OVERSHOOT);
+  });
+
   const notifyChange = (px: number) => {
-    let p = px / trackWidth;
+    const tw = trackWidthSv.value;
+    let p = tw > 0 ? px / tw : 0;
     p = Math.max(0, Math.min(1, p));
-    let rawVal = min + p * (max - min);
-
-    // Snap to nearest step if steps provided
-    if (steps > 1) {
-      const stepVal = (max - min) / steps;
-      rawVal = Math.round((rawVal - min) / stepVal) * stepVal + min;
-    }
-
-    onChange(rawVal);
+    onChange(min + p * (max - min));
   };
 
   const notifyDragChange = (px: number) => {
     if (!onDragChange) return;
-    let p = px / trackWidth;
+    const tw = trackWidthSv.value;
+    let p = tw > 0 ? px / tw : 0;
     p = Math.max(0, Math.min(1, p));
     onDragChange(min + p * (max - min));
   };
@@ -91,12 +105,14 @@ export function ReaderSlider({
   const panGesture = Gesture.Pan()
     .onBegin((e) => {
       isDragging.value = true;
-      progressX.value = e.x;
-      runOnJS(notifyDragChange)(e.x);
+      const px = snapPx(Math.max(0, Math.min(e.x, trackWidthSv.value)), trackWidthSv.value);
+      progressX.value = px;
+      runOnJS(notifyDragChange)(px);
     })
     .onUpdate((e) => {
-      progressX.value = Math.max(0, Math.min(e.x, trackWidth));
-      runOnJS(notifyDragChange)(progressX.value);
+      const px = snapPx(Math.max(0, Math.min(e.x, trackWidthSv.value)), trackWidthSv.value);
+      progressX.value = px;
+      runOnJS(notifyDragChange)(px);
     })
     .onEnd(() => {
       isDragging.value = false;
@@ -104,90 +120,129 @@ export function ReaderSlider({
     });
 
   const tapGesture = Gesture.Tap().onEnd((e) => {
-    runOnJS(notifyChange)(e.x);
+    const px = snapPx(Math.max(0, Math.min(e.x, trackWidthSv.value)), trackWidthSv.value);
+    progressX.value = withTiming(px, { duration: 150 });
+    runOnJS(notifyChange)(px);
   });
 
   const composedGesture = Gesture.Race(panGesture, tapGesture);
 
-  const fillStyle = useAnimatedStyle(() => ({
-    width: progressX.value,
+  const fillStyle = useAnimatedStyle(() => ({ width: fillX.value }));
+
+  const cloneWithColor = (node: React.ReactNode, color: string): React.ReactNode => {
+    if (!React.isValidElement(node)) return node;
+    const el = node as React.ReactElement<any>;
+    return React.cloneElement(el, { color, style: [el.props.style, { color }] });
+  };
+
+  const ICON_FADE_RANGE = 14; // px over which icon crossfades
+  const LEFT_ICON_CENTER = 24;  // approx px from left edge to left icon center
+  const RIGHT_ICON_OFFSET = 24; // approx px from right edge to right icon center
+
+  const leftOnFillStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(
+      fillX.value,
+      [LEFT_ICON_CENTER - ICON_FADE_RANGE / 2, LEFT_ICON_CENTER + ICON_FADE_RANGE / 2],
+      [0, 1],
+      Extrapolation.CLAMP
+    ),
+  }));
+  const leftOnInactiveStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(
+      fillX.value,
+      [LEFT_ICON_CENTER - ICON_FADE_RANGE / 2, LEFT_ICON_CENTER + ICON_FADE_RANGE / 2],
+      [1, 0],
+      Extrapolation.CLAMP
+    ),
+  }));
+
+  const rightOnFillStyle = useAnimatedStyle(() => {
+    const threshold = trackWidthSv.value - RIGHT_ICON_OFFSET;
+    return {
+      opacity: interpolate(
+        fillX.value,
+        [threshold - ICON_FADE_RANGE / 2, threshold + ICON_FADE_RANGE / 2],
+        [0, 1],
+        Extrapolation.CLAMP
+      ),
+    };
+  });
+  const rightOnInactiveStyle = useAnimatedStyle(() => {
+    const threshold = trackWidthSv.value - RIGHT_ICON_OFFSET;
+    return {
+      opacity: interpolate(
+        fillX.value,
+        [threshold - ICON_FADE_RANGE / 2, threshold + ICON_FADE_RANGE / 2],
+        [1, 0],
+        Extrapolation.CLAMP
+      ),
+    };
+  });
+
+  const rightIconStyle = useAnimatedStyle(() => ({
+    zIndex: trackWidthSv.value > 0 && progressX.value >= trackWidthSv.value ? 10 : 2,
   }));
 
   const thumbStyle = useAnimatedStyle(() => ({
     transform: [{ translateX: progressX.value - 10 }],
   }));
 
-  // Render dots
   const numberOfDots = steps > 1 ? steps - 1 : 0;
   const dots = [];
   for (let i = 1; i <= numberOfDots; i++) {
     dots.push(
       <View
         key={i}
-        style={[
-          styles.dot,
-          {
-            backgroundColor: dotColor,
-            left: `${(i / steps) * 100}%`,
-          },
-        ]}
+        style={[styles.dot, { backgroundColor: dotColor, left: `${(i / steps) * 100}%` }]}
       />
     );
   }
 
   return (
-    <View style={styles.container}>
-      {leftIcon && <View style={styles.iconContainer}>{leftIcon}</View>}
-
-      <GestureDetector gesture={composedGesture}>
-        <View style={styles.trackWrapper} onLayout={onLayout}>
-          <View
-            style={[
-              styles.track,
-              { backgroundColor: inactiveColor, height, borderRadius: height / 2 },
-            ]}
-          >
-            {dots}
-            <Animated.View
-              style={[
-                styles.fill,
-                { backgroundColor: activeColor, borderRadius: height / 2 },
-                fillStyle,
-              ]}
-            />
-          </View>
-
-          {!hideThumb && (
-            <Animated.View
-              style={[
-                styles.thumb,
-                { backgroundColor: activeColor },
-                thumbStyle,
-              ]}
-            />
-          )}
+    <GestureDetector gesture={composedGesture}>
+      <View style={styles.trackWrapper} onLayout={onLayout}>
+        <View style={[styles.track, { backgroundColor: inactiveColor, height, borderRadius: height / 2 }]}>
+          {dots}
+          <Animated.View
+            style={[styles.fill, { backgroundColor: activeColor, borderRadius: height / 2 }, fillStyle]}
+          />
         </View>
-      </GestureDetector>
 
-      {rightIcon && <View style={styles.iconContainer}>{rightIcon}</View>}
-    </View>
+        {leftIcon && (
+          <View pointerEvents="none" style={styles.innerLeftIcon}>
+            <View style={{ opacity: 0 }}>{leftIcon}</View>
+            <Animated.View style={[StyleSheet.absoluteFillObject, styles.iconCenter, leftOnInactiveStyle]}>
+              {cloneWithColor(leftIcon, inactiveIconColor)}
+            </Animated.View>
+            <Animated.View style={[StyleSheet.absoluteFillObject, styles.iconCenter, leftOnFillStyle]}>
+              {cloneWithColor(leftIcon, activeIconColor)}
+            </Animated.View>
+          </View>
+        )}
+        {rightIcon && (
+          <Animated.View pointerEvents="none" style={[styles.innerRightIcon, rightIconStyle]}>
+            <View style={{ opacity: 0 }}>{rightIcon}</View>
+            <Animated.View style={[StyleSheet.absoluteFillObject, styles.iconCenter, rightOnInactiveStyle]}>
+              {cloneWithColor(rightIcon, inactiveIconColor)}
+            </Animated.View>
+            <Animated.View style={[StyleSheet.absoluteFillObject, styles.iconCenter, rightOnFillStyle]}>
+              {cloneWithColor(rightIcon, activeIconColor)}
+            </Animated.View>
+          </Animated.View>
+        )}
+
+        {!hideThumb && (
+          <Animated.View style={[styles.thumb, { backgroundColor: activeColor }, thumbStyle]} />
+        )}
+      </View>
+    </GestureDetector>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  iconContainer: {
-    width: 32,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   trackWrapper: {
-    flex: 1,
+    position: 'relative',
     justifyContent: 'center',
-    marginHorizontal: 0,
   },
   track: {
     width: '100%',
@@ -203,10 +258,12 @@ const styles = StyleSheet.create({
   },
   dot: {
     position: 'absolute',
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    marginLeft: -2,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginLeft: -3,
+    top: '50%',
+    marginTop: -3,
     zIndex: 1,
   },
   thumb: {
@@ -214,10 +271,25 @@ const styles = StyleSheet.create({
     width: 20,
     height: 8,
     borderRadius: 4,
+  },
+  innerLeftIcon: {
+    position: 'absolute',
+    left: 12,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    zIndex: 2,
+  },
+  innerRightIcon: {
+    position: 'absolute',
+    right: 12,
+    top: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    zIndex: 2,
+  },
+  iconCenter: {
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  thumbInner: {
-    display: 'none',
   },
 });
