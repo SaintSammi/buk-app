@@ -36,6 +36,8 @@ interface ReaderFloatingControlsProps {
   positionCount: number;
   onSeek?: (progression: number) => void;
   onGoto?: (locator: string) => void;
+  onOpenBookmarks?: () => void;
+  onOpenChapters?: () => void;
 }
 
 function getGradientColors(bgHex: string): string[] {
@@ -71,6 +73,8 @@ export function ReaderFloatingControls({
   positionCount,
   onSeek,
   onGoto,
+  onOpenBookmarks,
+  onOpenChapters,
 }: ReaderFloatingControlsProps) {
   const insets = useSafeAreaInsets();
   const theme = READER_THEMES[prefs.themeId];
@@ -148,6 +152,8 @@ export function ReaderFloatingControls({
               position={position}
               positionCount={positionCount}
               onSeek={onSeek}
+              onOpenBookmarks={onOpenBookmarks}
+              onOpenChapters={onOpenChapters}
             />
           </Animated.View>
         )}

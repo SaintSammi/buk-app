@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { StyleSheet, View, Text } from 'react-native';
+import { StyleSheet, View, Text, Pressable } from 'react-native';
 import { Image } from 'expo-image';
 import type { EpubTocItem } from '@/modules/buk-readium';
 import type { ReaderPrefs } from '@/hooks/use-reader-prefs';
@@ -20,6 +20,8 @@ interface ReaderContentsProps {
   positionCount: number;
   onGoto?: (locator: string) => void;
   onSeek?: (progression: number) => void;
+  onOpenBookmarks?: () => void;
+  onOpenChapters?: () => void;
 }
 
 export function ReaderContents({
@@ -33,6 +35,8 @@ export function ReaderContents({
   positionCount,
   onGoto,
   onSeek,
+  onOpenBookmarks,
+  onOpenChapters,
 }: ReaderContentsProps) {
   const theme = READER_THEMES[prefs.themeId];
   const chapterCount = toc.length;
@@ -87,7 +91,7 @@ export function ReaderContents({
 
       {/* Bookmarks & Chapter Cards */}
       <View style={styles.cardsFrame}>
-        <View style={styles.cardItem}>
+        <Pressable style={styles.cardItem} onPress={onOpenBookmarks}>
           <View style={[styles.cardIconContainer, { backgroundColor: theme.iconContainerBg }]}>
             <Image source={bookmarkBookIcon} style={styles.cardIcon} />
           </View>
@@ -97,18 +101,18 @@ export function ReaderContents({
               {bookmarkCount} {bookmarkCount === 1 ? 'bookmark' : 'bookmarks'}
             </Text>
           </View>
-        </View>
-        <View style={styles.cardItem}>
+        </Pressable>
+        <Pressable style={styles.cardItem} onPress={onOpenChapters}>
           <View style={[styles.cardIconContainer, { backgroundColor: theme.iconContainerBg }]}>
             <Image source={chapterIcon} style={styles.cardIcon} />
           </View>
           <View style={styles.cardText}>
             <Text style={[styles.cardTitle, { color: theme.panelText }]}>Chapter</Text>
             <Text style={[styles.cardSubtitle, { color: theme.panelSubtext }]}>
-              {chapterCount} {chapterCount === 1 ? 'Chapter' : 'Chapters'}
+              {toc.length} {toc.length === 1 ? 'Chapter' : 'Chapters'}
             </Text>
           </View>
-        </View>
+        </Pressable>
       </View>
 
     </View>
