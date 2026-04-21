@@ -72,11 +72,19 @@ export function ReaderLayout({
 
   const handleTabPress = useCallback((tab: 'contents' | 'settings') => {
     if (activeTab === tab) {
-      closePanel(); // Toggle off if already active
+      closePanel();
     } else {
       openPanel(tab);
     }
   }, [activeTab, openPanel, closePanel]);
+
+  // Instantly clear backdrop when controls are hidden (e.g. navigating to bookmarks/chapters)
+  useEffect(() => {
+    if (!controlsVisible) {
+      setActiveTab('none');
+      backdropAlpha.value = 0;
+    }
+  }, [controlsVisible, backdropAlpha]);
 
   const theme = READER_THEMES[prefs.themeId];
 

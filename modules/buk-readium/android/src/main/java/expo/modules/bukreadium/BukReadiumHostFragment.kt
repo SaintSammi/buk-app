@@ -13,6 +13,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 import org.readium.r2.navigator.epub.EpubNavigatorFactory
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
 import org.readium.r2.navigator.epub.EpubPreferences
@@ -62,6 +63,7 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
 
     // Cached total positions — populated once navigator is ready
     private var positionCount: Int = 0
+    private var cachedPositions: List<Locator> = emptyList()
 
     // CSS top inset (px) to inject into the epub WebView content
     private var contentInsetTopPx: Int = 0
@@ -167,7 +169,9 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
         // Compute positions list once — this suspends briefly
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                positionCount = publication.positions().size
+                val positions = publication.positions()
+                cachedPositions = positions
+                positionCount = positions.size
                 viewListener?.onNavigatorReady(positionCount)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to get positions", e)
@@ -183,15 +187,26 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
             }
         })
 
-        // Observe current locator changes
+        // Observe current locator changes for the full lifetime of this Fragment's view.
+        // Do NOT use repeatOnLifecycle(STARTED) here — that pauses collection when the
+        // screen is covered (e.g. bookmarks/chapters pushed on top), causing swipe events
+        // after a chapter jump to be silently dropped until the lifecycle re-enters STARTED.
         viewLifecycleOwner.lifecycleScope.launch {
-            viewLifecycleOwner.repeatOnLifecycle(Lifecycle.State.STARTED) {
-                nav.currentLocator.collect { locator ->
-                    val progression = locator.locations.totalProgression ?: 0.0
-                    val position = locator.locations.position ?: 0
-                    viewListener?.onLocationChanged(locator, position, positionCount, progression)
-                    injectInsetCss()
+            nav.currentLocator.collect { locator ->
+                val progression = locator.locations.totalProgression ?: 0.0
+                var position = locator.locations.position ?: 0
+                // After navigator.go(), Readium may emit locators without position set.
+                // Derive position from totalProgression using the cached positions list.
+                if (position == 0) {
+                    val cached = cachedPositions
+                    if (cached.isNotEmpty()) {
+                        val idx = (progression * (cached.size - 1)).roundToInt()
+                            .coerceIn(0, cached.size - 1)
+                        position = cached[idx].locations.position ?: (idx + 1)
+                    }
                 }
+                viewListener?.onLocationChanged(locator, position, positionCount, progression)
+                injectInsetCss()
             }
         }
     }
@@ -231,9 +246,27 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
         viewLifecycleOwner.lifecycleScope.launch {
             val positions = publication.positions()
             if (positions.isEmpty()) return@launch
-            val targetIdx = (totalProgression * (positions.size - 1)).toInt()
+            // Use roundToInt instead of toInt() (which truncates/floors) to avoid
+            // landing 1-2 pages before the target due to floating-point imprecision.
+            val targetIdx = (totalProgression * (positions.size - 1)).roundToInt()
                 .coerceIn(0, positions.size - 1)
             navigator?.go(positions[targetIdx])
+        }
+    }
+
+    fun goToPosition(position: Int) {
+        viewLifecycleOwner.lifecycleScope.launch {
+            val positions = publication.positions()
+            if (positions.isEmpty()) return@launch
+            val idx = (position - 1).coerceIn(0, positions.size - 1)
+            val target = positions[idx]
+            navigator?.go(target)
+            // Dispatch the authoritative position immediately using the live
+            // positions array entry — this is exact and doesn't rely on the
+            // Flow emitting a non-null position after navigation.
+            val realPosition = target.locations.position ?: (idx + 1)
+            val realProgression = target.locations.totalProgression ?: 0.0
+            viewListener?.onLocationChanged(target, realPosition, positionCount, realProgression)
         }
     }
 

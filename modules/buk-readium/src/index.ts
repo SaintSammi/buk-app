@@ -40,7 +40,7 @@ export interface BukErrorEvent {
 
 // ─── Command type ─────────────────────────────────────────────────────────────
 
-export type BukReadiumCommandType = 'next' | 'prev' | 'goto' | 'gotoProgression';
+export type BukReadiumCommandType = 'next' | 'prev' | 'goto' | 'gotoProgression' | 'gotoPosition';
 
 export interface BukReadiumCommand {
   /** Monotonically increasing id — native side deduplicates by id */
@@ -50,12 +50,17 @@ export interface BukReadiumCommand {
   locator?: string;
   /** Total progression 0.0–1.0 — only for 'gotoProgression' */
   progression?: number;
+  /** 1-based position index — only for 'gotoPosition' */
+  position?: number;
 }
 
 /** Build a navigation command string ready for the `command` prop */
 export function buildCommand(type: BukReadiumCommandType, locatorOrProgression?: string | number): string {
   if (type === 'gotoProgression' && typeof locatorOrProgression === 'number') {
     return JSON.stringify({ id: Date.now(), type, progression: locatorOrProgression } satisfies BukReadiumCommand);
+  }
+  if (type === 'gotoPosition' && typeof locatorOrProgression === 'number') {
+    return JSON.stringify({ id: Date.now(), type, position: locatorOrProgression } satisfies BukReadiumCommand);
   }
   return JSON.stringify({ id: Date.now(), type, locator: locatorOrProgression as string } satisfies BukReadiumCommand);
 }

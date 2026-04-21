@@ -15,6 +15,7 @@ import org.readium.r2.shared.util.asset.AssetRetriever
 import org.readium.r2.shared.util.getOrElse
 import org.readium.r2.shared.util.http.DefaultHttpClient
 import org.readium.r2.shared.publication.services.cover
+import org.readium.r2.shared.publication.services.positions
 import org.readium.r2.streamer.PublicationOpener
 import org.readium.r2.streamer.parser.DefaultPublicationParser
 import java.io.File
@@ -163,15 +164,49 @@ class BukReadiumModule : Module() {
                         return@launch promise.reject("E_OPEN", "Cannot open publication: $it", null)
                     }
 
-                    val toc = publication.tableOfContents.map {
+                    // Load positions once so we can inject totalProgression + position
+                    // into each TOC locator. This makes chapter navigation reliable via
+                    // gotoProgression instead of the unreliable raw-href goto.
+                    val allPositions = try {
+                        publication.positions()
+                    } catch (e: Exception) {
+                        emptyList<org.readium.r2.shared.publication.Locator>()
+                    }
+
+                    val toc = publication.tableOfContents.map { tocEntry ->
+                        val hrefStr = tocEntry.href.toString()
+                        val hrefBase = hrefStr.split("#")[0]
+
+                        // Find the first position whose href matches this chapter href.
+                        // Position hrefs are absolute (e.g. epub://id/OEBPS/ch1.xhtml)
+                        // while TOC hrefs may be relative (e.g. OEBPS/ch1.xhtml), so
+                        // we use endsWith for matching.
+                        val matchingPos = allPositions.firstOrNull { pos ->
+                            val posHref = pos.href.toString().split("#")[0]
+                            posHref == hrefBase || posHref.endsWith("/$hrefBase")
+                        }
+
                         val locJson = org.json.JSONObject().apply {
-                            put("href", it.href.toString())
+                            // Use the position's absolute href if found — relative hrefs
+                            // cause Locator.fromJSON to return null, breaking goto.
+                            val resolvedHref = matchingPos?.href?.toString() ?: hrefStr
+                            put("href", resolvedHref)
                             put("type", "application/xhtml+xml")
-                            if (it.title != null) put("title", it.title)
+                            if (tocEntry.title != null) put("title", tocEntry.title)
+                            if (matchingPos != null) {
+                                val locs = org.json.JSONObject()
+                                matchingPos.locations.totalProgression?.let { tp ->
+                                    locs.put("totalProgression", tp)
+                                }
+                                matchingPos.locations.position?.let { p ->
+                                    locs.put("position", p)
+                                }
+                                put("locations", locs)
+                            }
                         }.toString()
                         mapOf(
-                            "title" to it.title,
-                            "href" to it.href.toString(),
+                            "title" to tocEntry.title,
+                            "href" to hrefStr,
                             "locator" to locJson
                         )
                     }

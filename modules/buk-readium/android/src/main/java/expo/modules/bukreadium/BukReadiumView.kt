@@ -106,6 +106,10 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
     private var pendingSrc: String? = null
     private var lastCommandId: Double = Double.MIN_VALUE
     private var cleanupRunnable: Runnable? = null
+    // A navigation command that arrived before the navigator was ready.
+    // Executed on the FIRST onLocationChanged event (= navigator is truly operational).
+    private var pendingCommand: String? = null
+    private var executePendingOnFirstLocation = false
     // ─── Layout ──────────────────────────────────────────────────────────────
 
     // React Native's Yoga engine swallows native requestLayout() calls that bubble
@@ -188,9 +192,19 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
             val obj = JSONObject(json)
             val id = obj.getDouble("id")
             if (id == lastCommandId) return
-            lastCommandId = id
+            // IMPORTANT: do NOT set lastCommandId here — set it only when actually
+            // executing. If we set it now and then buffer the command (hostFragment
+            // null), the re-execution from onNavigatorReady would be rejected as a
+            // duplicate, silently dropping the navigation.
 
-            val host = hostFragment ?: return
+            val host = hostFragment
+            if (host == null) {
+                // Navigator not ready yet — buffer the command and execute on onNavigatorReady
+                pendingCommand = json
+                return
+            }
+            pendingCommand = null
+            lastCommandId = id  // Set only when we are about to execute
             when (obj.optString("type")) {
                 "next" -> host.goForward()
                 "prev" -> host.goBackward()
@@ -204,6 +218,11 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
                     val progression = obj.optDouble("progression", -1.0)
                     if (progression < 0.0) return
                     host.goToProgression(progression)
+                }
+                "gotoPosition" -> {
+                    val position = obj.optInt("position", -1)
+                    if (position < 1) return
+                    host.goToPosition(position)
                 }
             }
         } catch (e: Exception) {
@@ -354,6 +373,7 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
                     .commitNowAllowingStateLoss()
             }
             hostFragment = null
+            executePendingOnFirstLocation = false
         } catch (e: Exception) {
             Log.w(TAG, "dismountCurrentFragment: $e")
         }
@@ -364,6 +384,13 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
     private fun makeListener() = object : BukReadiumHostFragment.Listener {
         override fun onNavigatorReady(positionCount: Int) {
             dispatchEvent("onBukReady", mapOf("positionCount" to positionCount))
+            // Don't execute pendingCommand here — the WebView may not be ready to
+            // process go() calls yet. Wait for the first onLocationChanged instead,
+            // which confirms the EPUB content is loaded and navigable.
+            if (pendingCommand != null) {
+                Log.i(TAG, "onNavigatorReady: pendingCommand present, waiting for first location event")
+                executePendingOnFirstLocation = true
+            }
         }
 
         override fun onLocationChanged(
@@ -372,8 +399,27 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
             positionCount: Int,
             progression: Double
         ) {
+            // Execute any buffered navigation command on the first real location event.
+            // This is the reliable signal that the navigator WebView is fully operational.
+            if (executePendingOnFirstLocation) {
+                executePendingOnFirstLocation = false
+                val cmd = pendingCommand
+                if (cmd != null) {
+                    pendingCommand = null
+                    Log.i(TAG, "onLocationChanged: executing buffered command")
+                    mainHandler.post { handleCommand(cmd) }
+                }
+            }
             try {
-                val locatorJson = locator.toJSON().toString()
+                // Enrich the locator JSON with the computed totalProgression so that
+                // it is always present when the locator is stored as a bookmark or
+                // pending-goto and later used for gotoProgression navigation.
+                val locatorObj = locator.toJSON()
+                val locations = locatorObj.optJSONObject("locations") ?: org.json.JSONObject().also {
+                    locatorObj.put("locations", it)
+                }
+                locations.put("totalProgression", progression)
+                val locatorJson = locatorObj.toString()
                 dispatchEvent("onBukLocation", mapOf(
                     "locator"      to locatorJson,
                     "position"     to position,

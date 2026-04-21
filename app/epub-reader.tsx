@@ -137,8 +137,23 @@ export default function EpubReaderScreen() {
     if (!resolvedBookId) return;
     AsyncStorage.getItem(pendingGotoKey(resolvedBookId)).then((val) => {
       if (val) {
-        setCommand(buildCommand('goto', val));
         AsyncStorage.removeItem(pendingGotoKey(resolvedBookId));
+        try {
+          const parsed = JSON.parse(val);
+          const totalProg = parsed?.locations?.totalProgression;
+          const pos = parsed?.locations?.position;
+          // Prefer integer position index — exact, no float rounding errors.
+          // Fall back to totalProgression, then raw goto.
+          if (typeof pos === 'number') {
+            setCommand(buildCommand('gotoPosition', pos));
+          } else if (typeof totalProg === 'number') {
+            setCommand(buildCommand('gotoProgression', totalProg));
+          } else {
+            setCommand(buildCommand('goto', val));
+          }
+        } catch {
+          setCommand(buildCommand('goto', val));
+        }
       }
     });
   }, [resolvedBookId]));
@@ -151,7 +166,7 @@ export default function EpubReaderScreen() {
 
   const handleLocation = useCallback((event: BukLocationEvent) => {
     const { locator, position, positionCount: total, progression: prog } = event.nativeEvent;
-    setCurrentPosition(position);
+    if (position > 0) setCurrentPosition(position);
     setProgression(prog);
     setCurrentLocator(locator);
     if (total > 0) setPositionCount(total);
