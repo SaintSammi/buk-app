@@ -38,26 +38,36 @@ export function useLibrary() {
         }
 
         if (!cancelled) {
-          if (savedBooks && savedBooks !== '[]') {
-            setBooks(JSON.parse(savedBooks));
-            setIsLoading(false);
-          } else if (!savedBooks) {
-            // First time launch: resolve assets to file references
-            const resolvedBooks = await Promise.all(
-              defaultBooks.map(async (book) => {
-                if (book.assetModule) {
-                  try {
-                    const asset = Asset.fromModule(book.assetModule);
-                    await asset.downloadAsync();
-                    return { ...book, fileUri: asset.localUri || asset.uri };
-                  } catch (e) {
-                    console.warn(`Failed to resolve asset for ${book.title}`);
-                  }
+          // Re-resolve asset URIs for pre-packaged books — the local cache path
+          // changes between installs so a stored file:// URI may no longer exist.
+          const resolvePrepackaged = async (parsed: Book[]): Promise<Book[]> => {
+            return Promise.all(
+              parsed.map(async (book) => {
+                const defaultBook = defaultBooks.find((d) => d.id === book.id);
+                if (!defaultBook?.assetModule) return book;
+                try {
+                  const asset = Asset.fromModule(defaultBook.assetModule);
+                  await asset.downloadAsync();
+                  const uri = asset.localUri || asset.uri;
+                  return { ...book, assetModule: defaultBook.assetModule, fileUri: uri };
+                } catch {
+                  return book;
                 }
-                return book;
               })
             );
-            
+          };
+
+          if (savedBooks && savedBooks !== '[]') {
+            const parsed: Book[] = JSON.parse(savedBooks);
+            const resolved = await resolvePrepackaged(parsed);
+            if (!cancelled) {
+              setBooks(resolved);
+              AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(resolved));
+              setIsLoading(false);
+            }
+          } else if (!savedBooks) {
+            // First time launch
+            const resolvedBooks = await resolvePrepackaged(defaultBooks);
             if (!cancelled) {
               setBooks(resolvedBooks);
               AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(resolvedBooks));
@@ -89,7 +99,19 @@ export function useLibrary() {
 
   const openBook = useCallback(
     async (book: Book) => {
-      const uri = book.fileUri ?? '';
+      let uri = book.fileUri ?? '';
+
+      // If this is a pre-packaged book whose cached path may have changed
+      // (e.g. after a reinstall), re-resolve the asset before opening.
+      const defaultBook = defaultBooks.find((d) => d.id === book.id);
+      if (defaultBook?.assetModule) {
+        try {
+          const asset = Asset.fromModule(defaultBook.assetModule);
+          await asset.downloadAsync();
+          uri = asset.localUri || asset.uri || uri;
+        } catch {}
+      }
+
       if (uri.startsWith('file://')) {
         try {
           const info = await FileSystem.getInfoAsync(uri);
@@ -125,7 +147,7 @@ export function useLibrary() {
             bookId: book.id,
             title: book.title,
             author: book.author || undefined,
-            fileUri: book.fileUri,
+            fileUri: uri,
           },
         });
       } else if (sourceType === 'pdf') {
@@ -134,7 +156,7 @@ export function useLibrary() {
           params: {
             bookId: book.id,
             title: book.title,
-            fileUri: book.fileUri,
+            fileUri: uri,
           },
         });
       } else if (sourceType === 'txt') {

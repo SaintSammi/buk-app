@@ -203,6 +203,8 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
                 pendingCommand = json
                 return
             }
+            // Cancel any pending position restore so it doesn't overwrite this command
+            host.cancelPendingRestore()
             pendingCommand = null
             lastCommandId = id  // Set only when we are about to execute
             when (obj.optString("type")) {

@@ -166,7 +166,20 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
         }
 
         Log.i(TAG, "onViewCreated: starting positions + flow collection")
-        // Compute positions list once — this suspends briefly
+
+        // Register InputListener to receive tap events (used to toggle controls overlay)
+        nav.addInputListener(object : InputListener {
+            override fun onTap(event: TapEvent): Boolean {
+                viewListener?.onTap(event.point.x, event.point.y)
+                return false // Not consumed — let Readium handle links and edge-tap navigation
+            }
+        })
+
+        // Load positions first, THEN start flow collection — this ensures cachedPositions is
+        // always populated before we handle any locator event. Using a single sequential
+        // coroutine eliminates the race where a Flow emission arrives before positions are ready.
+        // currentLocator is a StateFlow so collecting after positions load still delivers the
+        // current page immediately (no events are missed).
         viewLifecycleOwner.lifecycleScope.launch {
             try {
                 val positions = publication.positions()
@@ -177,25 +190,20 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
                 Log.e(TAG, "Failed to get positions", e)
                 viewListener?.onNavigatorReady(0)
             }
-        }
 
-        // Register InputListener to receive tap events (used to toggle controls overlay)
-        nav.addInputListener(object : InputListener {
-            override fun onTap(event: TapEvent): Boolean {
-                viewListener?.onTap(event.point.x, event.point.y)
-                return false // Not consumed — let Readium handle links and edge-tap navigation
-            }
-        })
-
-        // Observe current locator changes for the full lifetime of this Fragment's view.
-        // Do NOT use repeatOnLifecycle(STARTED) here — that pauses collection when the
-        // screen is covered (e.g. bookmarks/chapters pushed on top), causing swipe events
-        // after a chapter jump to be silently dropped until the lifecycle re-enters STARTED.
-        viewLifecycleOwner.lifecycleScope.launch {
+            // Observe current locator changes for the full lifetime of this Fragment's view.
+            // Do NOT use repeatOnLifecycle(STARTED) here — that pauses collection when the
+            // screen is covered (e.g. bookmarks/chapters pushed on top), causing swipe events
+            // after a chapter jump to be silently dropped until the lifecycle re-enters STARTED.
             nav.currentLocator.collect { locator ->
+                // Navigation has landed — the StateFlow is now authoritative, so
+                // clear lastCommandedLocator (used by onStop as a fallback when the
+                // StateFlow hasn't yet updated after a programmatic go() call).
+                lastCommandedLocator = null
+
                 val progression = locator.locations.totalProgression ?: 0.0
                 var position = locator.locations.position ?: 0
-                // After navigator.go(), Readium may emit locators without position set.
+                // After navigator.go(), Readium emits locators with null position.
                 // Derive position from totalProgression using the cached positions list.
                 if (position == 0) {
                     val cached = cachedPositions
@@ -213,14 +221,66 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
 
     // ─── EpubNavigatorFragment.Listener (HyperlinkNavigator.Listener) ────────
 
+    // Locator saved in onStop so onResume can restore it instead of using
+    // Readium's built-in initialLocator reset which always goes back to the
+    // position the book was opened at (not where the user navigated to).
+    private var savedLocatorOnStop: Locator? = null
+    // The TARGET locator of the most recent programmatic navigation command.
+    // Set in go/goToProgression/goToPosition, cleared when the Flow confirms
+    // the navigation has landed. Lets onStop capture the correct position even
+    // when navigator.currentLocator.value hasn't updated yet (async WebView ack).
+    private var lastCommandedLocator: Locator? = null
+    // Pending restore runnable — cancelled if a navigation command arrives first
+    // (e.g. a pending-goto chapter/bookmark tap from the JS side).
+    private var restoreRunnable: Runnable? = null
+
+    /** Cancel a pending position restore. Called by BukReadiumView when any navigation command fires. */
+    fun cancelPendingRestore() {
+        restoreRunnable?.let { view?.removeCallbacks(it) }
+        restoreRunnable = null
+        savedLocatorOnStop = null
+        Log.i(TAG, "cancelPendingRestore: restore cancelled")
+    }
+
+    override fun onStop() {
+        super.onStop()
+        // Cancel any leftover restore from a previous resume cycle
+        restoreRunnable?.let { view?.removeCallbacks(it) }
+        restoreRunnable = null
+        // Prefer lastCommandedLocator (the target of the most recent go() call) over
+        // navigator.currentLocator.value — the StateFlow may not have updated yet if the
+        // WebView hasn't finished processing the navigation (async JS ack).
+        savedLocatorOnStop = lastCommandedLocator ?: navigator?.currentLocator?.value
+        Log.i(TAG, "onStop: saved locator=${savedLocatorOnStop?.locations?.position} (fromCommand=${lastCommandedLocator != null})")
+    }
+
     override fun onStart() {
         super.onStart()
-        Log.i(TAG, "onStart: navigator=${navigator != null} navigatorView=${navigator?.view != null}")
+        Log.i(TAG, "onStart: navigator=${navigator != null}")
+        // Restore is deferred to onResume() + postDelayed so it runs after
+        // EpubNavigatorFragment's own onStart() resets the WebView to initialLocator,
+        // AND after the JS bridge has had time to deliver any pending-goto command.
     }
 
     override fun onResume() {
         super.onResume()
-        Log.i(TAG, "onResume: navigator=${navigator != null}")
+        val saved = savedLocatorOnStop ?: run {
+            Log.i(TAG, "onResume: no saved locator")
+            return
+        }
+        savedLocatorOnStop = null
+        Log.i(TAG, "onResume: scheduling restore to pos=${saved.locations?.position} in 350ms")
+        val v = view ?: return
+        val r = Runnable {
+            restoreRunnable = null
+            Log.i(TAG, "onResume restore: firing navigator.go pos=${saved.locations?.position}")
+            lifecycleScope.launch { navigator?.go(saved) }
+        }
+        restoreRunnable = r
+        // 350ms gives the JS bridge enough time to deliver a pending-goto command
+        // (chapter/bookmark tap). If a command arrives, cancelPendingRestore() removes
+        // this runnable. If no command arrives within 350ms, we restore position normally.
+        v.postDelayed(r, 350)
     }
 
     override fun onExternalLinkActivated(url: AbsoluteUrl) {
@@ -231,43 +291,38 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
     // ─── Public control API ───────────────────────────────────────────────────
 
     fun goForward() {
-        viewLifecycleOwner.lifecycleScope.launch { navigator?.goForward() }
+        lifecycleScope.launch { navigator?.goForward() }
     }
 
     fun goBackward() {
-        viewLifecycleOwner.lifecycleScope.launch { navigator?.goBackward() }
+        lifecycleScope.launch { navigator?.goBackward() }
     }
 
     fun go(locator: Locator) {
-        viewLifecycleOwner.lifecycleScope.launch { navigator?.go(locator) }
+        lastCommandedLocator = locator
+        lifecycleScope.launch { navigator?.go(locator) }
     }
 
     fun goToProgression(totalProgression: Double) {
-        viewLifecycleOwner.lifecycleScope.launch {
-            val positions = publication.positions()
-            if (positions.isEmpty()) return@launch
-            // Use roundToInt instead of toInt() (which truncates/floors) to avoid
-            // landing 1-2 pages before the target due to floating-point imprecision.
-            val targetIdx = (totalProgression * (positions.size - 1)).roundToInt()
-                .coerceIn(0, positions.size - 1)
-            navigator?.go(positions[targetIdx])
-        }
+        // Use cachedPositions (already loaded, no suspend) and lifecycleScope
+        // (Fragment-level, never cancelled by view destroy/create cycles) so
+        // that navigation commands always execute even during transitions.
+        val positions = cachedPositions
+        if (positions.isEmpty()) return
+        val targetIdx = (totalProgression * (positions.size - 1)).roundToInt()
+            .coerceIn(0, positions.size - 1)
+        val target = positions[targetIdx]
+        lastCommandedLocator = target
+        lifecycleScope.launch { navigator?.go(target) }
     }
 
     fun goToPosition(position: Int) {
-        viewLifecycleOwner.lifecycleScope.launch {
-            val positions = publication.positions()
-            if (positions.isEmpty()) return@launch
-            val idx = (position - 1).coerceIn(0, positions.size - 1)
-            val target = positions[idx]
-            navigator?.go(target)
-            // Dispatch the authoritative position immediately using the live
-            // positions array entry — this is exact and doesn't rely on the
-            // Flow emitting a non-null position after navigation.
-            val realPosition = target.locations.position ?: (idx + 1)
-            val realProgression = target.locations.totalProgression ?: 0.0
-            viewListener?.onLocationChanged(target, realPosition, positionCount, realProgression)
-        }
+        val positions = cachedPositions
+        if (positions.isEmpty()) return
+        val idx = (position - 1).coerceIn(0, positions.size - 1)
+        val target = positions[idx]
+        lastCommandedLocator = target
+        lifecycleScope.launch { navigator?.go(target) }
     }
 
     fun submitPreferences(preferences: EpubPreferences) {
