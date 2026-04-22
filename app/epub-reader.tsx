@@ -75,6 +75,8 @@ export default function EpubReaderScreen() {
   // ─── Load locator in parallel ────────────────────────────────────
 
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Always holds the most-recent locator string so we can flush it without closing over stale state. */
+  const currentLocatorRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (!resolvedBookId) {
@@ -136,27 +138,33 @@ export default function EpubReaderScreen() {
   useFocusEffect(useCallback(() => {
     if (!resolvedBookId) return;
     AsyncStorage.getItem(pendingGotoKey(resolvedBookId)).then((val) => {
-      if (val) {
-        AsyncStorage.removeItem(pendingGotoKey(resolvedBookId));
-        try {
-          const parsed = JSON.parse(val);
-          const totalProg = parsed?.locations?.totalProgression;
-          const pos = parsed?.locations?.position;
-          // Prefer integer position index — exact, no float rounding errors.
-          // Fall back to totalProgression, then raw goto.
-          if (typeof pos === 'number') {
-            setCommand(buildCommand('gotoPosition', pos));
-          } else if (typeof totalProg === 'number') {
-            setCommand(buildCommand('gotoProgression', totalProg));
-          } else {
-            setCommand(buildCommand('goto', val));
+      if (!val) return;
+      AsyncStorage.removeItem(pendingGotoKey(resolvedBookId));
+      try {
+        const parsed = JSON.parse(val);
+        const totalProg = parsed?.locations?.totalProgression;
+        const pos = parsed?.locations?.position;
+        if (typeof totalProg === 'number') {
+          // Optimistic UI: show the approximate page immediately while the
+          // native view animates to the new position.
+          if (positionCount > 0) {
+            const optimistic = Math.max(1, Math.round(totalProg * positionCount));
+            setCurrentPosition(optimistic);
+          } else if (typeof pos === 'number' && pos > 0) {
+            setCurrentPosition(pos);
           }
-        } catch {
+          setCommand(buildCommand('gotoProgression', totalProg));
+        } else if (typeof pos === 'number' && pos > 0) {
+          setCurrentPosition(pos);
+          setCommand(buildCommand('gotoPosition', pos));
+        } else {
           setCommand(buildCommand('goto', val));
         }
+      } catch {
+        setCommand(buildCommand('goto', val));
       }
     });
-  }, [resolvedBookId]));
+  }, [resolvedBookId, positionCount]));
 
   // ─── Event handlers ──────────────────────────────────────────────────────
 
@@ -166,6 +174,7 @@ export default function EpubReaderScreen() {
 
   const handleLocation = useCallback((event: BukLocationEvent) => {
     const { locator, position, positionCount: total, progression: prog } = event.nativeEvent;
+
     if (position > 0) setCurrentPosition(position);
     setProgression(prog);
     setCurrentLocator(locator);
@@ -182,6 +191,8 @@ export default function EpubReaderScreen() {
       AsyncStorage.setItem(locatorKey(resolvedBookId), locator).catch(() => { });
       AsyncStorage.setItem(progressKey(resolvedBookId), String(prog)).catch(() => { });
     }, 500);
+    // Keep a ref of the locator so we can flush it instantly before leaving.
+    currentLocatorRef.current = locator;
   }, [resolvedBookId]);
 
   const handleTap = useCallback((_event: BukTapEvent) => {
@@ -203,12 +214,24 @@ export default function EpubReaderScreen() {
     });
   }, [resolvedBookId]);
 
+  /** Flush the latest locator to AsyncStorage right now, cancelling any pending debounce. */
+  const flushPosition = useCallback(() => {
+    if (!resolvedBookId || !currentLocatorRef.current) return;
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+    const loc = currentLocatorRef.current;
+    AsyncStorage.setItem(locatorKey(resolvedBookId), loc).catch(() => {});
+  }, [resolvedBookId]);
+
   const handleGoto = useCallback((locator: string) => {
     setCommand(buildCommand('goto', locator));
     setControlsVisible(false);
   }, []);
 
   const handleOpenBookmarks = useCallback(() => {
+    flushPosition();
     setControlsVisible(false);
     router.push({
       pathname: '/bookmarks',
@@ -220,9 +243,10 @@ export default function EpubReaderScreen() {
         bookmarks: JSON.stringify(bookmarks),
       },
     });
-  }, [router, resolvedBookId, resolvedTitle, resolvedAuthor, toc, bookmarks]);
+  }, [router, resolvedBookId, resolvedTitle, resolvedAuthor, toc, bookmarks, flushPosition]);
 
   const handleOpenChapters = useCallback(() => {
+    flushPosition();
     setControlsVisible(false);
     let currentHref = '';
     try {
@@ -238,7 +262,7 @@ export default function EpubReaderScreen() {
         currentHref,
       },
     });
-  }, [router, resolvedBookId, resolvedTitle, resolvedAuthor, toc, currentLocator]);
+  }, [router, resolvedBookId, resolvedTitle, resolvedAuthor, toc, currentLocator, flushPosition]);
 
   // ─── Derived ─────────────────────────────────────────────────────────────
   const isLoading = !positionLoaded || !prefsLoaded || !resolvedUri;
@@ -297,7 +321,7 @@ export default function EpubReaderScreen() {
         <BukReadiumView
           style={StyleSheet.absoluteFillObject}
           src={resolvedUri}
-          initialLocator={savedLocator ?? undefined}
+          initialLocator={currentLocator ?? savedLocator ?? undefined}
           preferences={readiumPrefs}
           command={command}
           onBukReady={handleReady}
