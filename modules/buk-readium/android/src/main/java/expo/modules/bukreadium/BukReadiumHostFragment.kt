@@ -230,16 +230,22 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
     // the navigation has landed. Lets onStop capture the correct position even
     // when navigator.currentLocator.value hasn't updated yet (async WebView ack).
     private var lastCommandedLocator: Locator? = null
-    // Pending restore runnable — cancelled if a navigation command arrives first
-    // (e.g. a pending-goto chapter/bookmark tap from the JS side).
+    // Pending restore runnable — cancelled if a navigation command arrives first.
     private var restoreRunnable: Runnable? = null
+    // Set by cancelPendingRestore() when a navigation command fires on the JS thread
+    // BEFORE onResume reaches the UI thread. Checked in onResume to skip the restore.
+    // Reset to false in onStop so each stop/resume cycle is independent.
+    private var restoreCancelled = false
 
     /** Cancel a pending position restore. Called by BukReadiumView when any navigation command fires. */
     fun cancelPendingRestore() {
         restoreRunnable?.let { view?.removeCallbacks(it) }
         restoreRunnable = null
         savedLocatorOnStop = null
-        Log.i(TAG, "cancelPendingRestore: restore cancelled")
+        // Mark cancelled so onResume skips the restore even if it hasn't been scheduled yet
+        // (handles the race where handleCommand runs before onResume on the UI thread).
+        restoreCancelled = true
+        Log.i(TAG, "cancelPendingRestore: restore cancelled (restoreCancelled=true)")
     }
 
     override fun onStop() {
@@ -247,6 +253,8 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
         // Cancel any leftover restore from a previous resume cycle
         restoreRunnable?.let { view?.removeCallbacks(it) }
         restoreRunnable = null
+        // Reset the cancelled flag — each stop/resume cycle is independent
+        restoreCancelled = false
         // Prefer lastCommandedLocator (the target of the most recent go() call) over
         // navigator.currentLocator.value — the StateFlow may not have updated yet if the
         // WebView hasn't finished processing the navigation (async JS ack).
@@ -257,9 +265,8 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
     override fun onStart() {
         super.onStart()
         Log.i(TAG, "onStart: navigator=${navigator != null}")
-        // Restore is deferred to onResume() + postDelayed so it runs after
-        // EpubNavigatorFragment's own onStart() resets the WebView to initialLocator,
-        // AND after the JS bridge has had time to deliver any pending-goto command.
+        // Restore is deferred to onResume() + view.post{} so it runs after
+        // EpubNavigatorFragment's own onStart() resets the WebView to initialLocator.
     }
 
     override fun onResume() {
@@ -268,19 +275,34 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
             Log.i(TAG, "onResume: no saved locator")
             return
         }
+        // A navigation command fired on the JS thread before onResume reached the UI thread.
+        if (restoreCancelled) {
+            Log.i(TAG, "onResume: restore pre-cancelled by incoming navigation command, skipping")
+            restoreCancelled = false
+            savedLocatorOnStop = null
+            return
+        }
         savedLocatorOnStop = null
-        Log.i(TAG, "onResume: scheduling restore to pos=${saved.locations?.position} in 350ms")
+        Log.i(TAG, "onResume: scheduling restore to pos=${saved.locations?.position}")
         val v = view ?: return
         val r = Runnable {
             restoreRunnable = null
+            if (restoreCancelled) {
+                Log.i(TAG, "onResume restore runnable: cancelled after post, skipping")
+                restoreCancelled = false
+                return@Runnable
+            }
             Log.i(TAG, "onResume restore: firing navigator.go pos=${saved.locations?.position}")
             lifecycleScope.launch { navigator?.go(saved) }
         }
         restoreRunnable = r
-        // 350ms gives the JS bridge enough time to deliver a pending-goto command
-        // (chapter/bookmark tap). If a command arrives, cancelPendingRestore() removes
-        // this runnable. If no command arrives within 350ms, we restore position normally.
-        v.postDelayed(r, 350)
+        // 300ms delay gives the JS bridge enough time to deliver a pending chapter/bookmark
+        // navigation command (AsyncStorage read + React render + bridge = ~50-150ms typical).
+        // Combined with restoreCancelled, this handles both orderings of the UI/JS race:
+        //   - command arrives before onResume: restoreCancelled=true, restore is skipped
+        //   - command arrives during 300ms window: cancelPendingRestore() removes this runnable
+        //   - no command within 300ms: restore fires normally (back from chapters without selecting)
+        v.postDelayed(r, 300)
     }
 
     override fun onExternalLinkActivated(url: AbsoluteUrl) {
