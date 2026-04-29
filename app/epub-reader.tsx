@@ -2,6 +2,7 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { consumePendingNavigation } from '@/services/pending-navigation';
 import { useKeepAwake } from 'expo-keep-awake';
 import { useFocusEffect } from '@react-navigation/native';
 import {
@@ -24,7 +25,6 @@ function locatorKey(bookId: string) { return `readium-locator:${bookId}`; }
 function progressKey(bookId: string) { return `progress-pct:${bookId}`; }
 function bookmarksKey(bookId: string) { return `readium-bookmarks:${bookId}`; }
 function statsKey(bookId: string) { return `book-stats:${bookId}`; }
-function pendingGotoKey(bookId: string) { return `pending-goto:${bookId}`; }
 
 export type BookmarkEntry = { locator: string; savedAt: number };
 
@@ -137,33 +137,35 @@ export default function EpubReaderScreen() {
 
   useFocusEffect(useCallback(() => {
     if (!resolvedBookId) return;
-    AsyncStorage.getItem(pendingGotoKey(resolvedBookId)).then((val) => {
-      if (!val) return;
-      AsyncStorage.removeItem(pendingGotoKey(resolvedBookId));
-      try {
-        const parsed = JSON.parse(val);
-        const totalProg = parsed?.locations?.totalProgression;
-        const pos = parsed?.locations?.position;
-        if (typeof totalProg === 'number') {
-          // Optimistic UI: show the approximate page immediately while the
-          // native view animates to the new position.
-          if (positionCount > 0) {
-            const optimistic = Math.max(1, Math.round(totalProg * positionCount));
-            setCurrentPosition(optimistic);
-          } else if (typeof pos === 'number' && pos > 0) {
-            setCurrentPosition(pos);
-          }
-          setCommand(buildCommand('gotoProgression', totalProg));
+    // Read synchronously from in-memory store (no I/O) so React re-renders and
+    // delivers the native command within ~16ms, well before the Kotlin restore
+    // timer (300ms). This eliminates the timing race between chapter navigation
+    // and the onResume position restore.
+    const val = consumePendingNavigation(resolvedBookId);
+    if (!val) return;
+    try {
+      const parsed = JSON.parse(val);
+      const totalProg = parsed?.locations?.totalProgression;
+      const pos = parsed?.locations?.position;
+      if (typeof totalProg === 'number') {
+        // Optimistic UI: show the approximate page immediately while the
+        // native view animates to the new position.
+        if (positionCount > 0) {
+          const optimistic = Math.max(1, Math.round(totalProg * positionCount));
+          setCurrentPosition(optimistic);
         } else if (typeof pos === 'number' && pos > 0) {
           setCurrentPosition(pos);
-          setCommand(buildCommand('gotoPosition', pos));
-        } else {
-          setCommand(buildCommand('goto', val));
         }
-      } catch {
+        setCommand(buildCommand('gotoProgression', totalProg));
+      } else if (typeof pos === 'number' && pos > 0) {
+        setCurrentPosition(pos);
+        setCommand(buildCommand('gotoPosition', pos));
+      } else {
         setCommand(buildCommand('goto', val));
       }
-    });
+    } catch {
+      setCommand(buildCommand('goto', val));
+    }
   }, [resolvedBookId, positionCount]));
 
   // ─── Event handlers ──────────────────────────────────────────────────────

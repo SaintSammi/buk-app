@@ -8,11 +8,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Feather } from '@expo/vector-icons';
 import type { EpubTocItem } from '@/modules/buk-readium';
-
-function pendingGotoKey(bookId: string) { return `pending-goto:${bookId}`; }
+import { setPendingNavigation } from '@/services/pending-navigation';
 
 export default function ChaptersScreen() {
   const router = useRouter();
@@ -33,9 +31,11 @@ export default function ChaptersScreen() {
 
   const handleItemPress = (item: EpubTocItem) => {
     if (!item.locator) return;
-    AsyncStorage.setItem(pendingGotoKey(resolvedBookId), item.locator).then(() => {
-      router.back();
-    });
+    // Write to in-memory store synchronously BEFORE router.back() so the
+    // epub-reader's useFocusEffect reads it in the same event loop tick,
+    // ensuring cancelPendingRestore() fires well before the 300ms restore timer.
+    setPendingNavigation(resolvedBookId, item.locator);
+    router.back();
   };
 
   // Compute page start and page count for each chapter

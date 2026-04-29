@@ -14,11 +14,11 @@ import { Feather } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import type { EpubTocItem } from '@/modules/buk-readium';
 import type { BookmarkEntry } from './epub-reader';
+import { setPendingNavigation } from '@/services/pending-navigation';
 
 const emptyStateIcon = require('@/assets/icons/bookmark empty state icon.svg');
 const bookmarkRemoveIcon = require('@/assets/icons/bookmark-remove.svg');
 
-function pendingGotoKey(bookId: string) { return `pending-goto:${bookId}`; }
 function bookmarksKey(bookId: string) { return `readium-bookmarks:${bookId}`; }
 
 function findChapterForHref(href: string, toc: EpubTocItem[]): { title: string; index: number } {
@@ -57,9 +57,9 @@ export default function BookmarksScreen() {
   });
 
   const handleItemPress = (locator: string) => {
-    AsyncStorage.setItem(pendingGotoKey(resolvedBookId), locator).then(() => {
-      router.back();
-    });
+    // Write to in-memory store synchronously BEFORE router.back() (see pending-navigation.ts).
+    setPendingNavigation(resolvedBookId, locator);
+    router.back();
   };
 
   const handleRemove = (entry: BookmarkEntry) => {
