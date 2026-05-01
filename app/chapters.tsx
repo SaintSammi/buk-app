@@ -38,7 +38,9 @@ export default function ChaptersScreen() {
     router.back();
   };
 
-  // Compute page start and page count for each chapter
+  // Compute page start and page count for each chapter.
+  // extractEpubToc now uses EpubNavigatorFactory before computing positions,
+  // so matchingPos.locations.position matches the live navigator exactly.
   const chaptersWithPages = React.useMemo(() => {
     return toc.map((item, idx) => {
       let pageStart = 0;

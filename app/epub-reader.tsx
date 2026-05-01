@@ -150,29 +150,16 @@ export default function EpubReaderScreen() {
     // The go() command below is sent as a fallback for cases where the view
     // does NOT recreate (e.g. if detachPreviousScreen ever works as intended).
     setCurrentLocator(val);
+    // The native view always fully recreates when returning from chapters/bookmarks
+    // (confirmed by logcat — scope cancel + reattach every time). initialLocator is
+    // therefore always sufficient; sending a gotoPosition command is not only
+    // unnecessary but harmful: pendingCommand fires on the first onLocationChanged
+    // AFTER initialLocator has already correctly opened the chapter, navigating away.
+    // Just show the chapter's own position optimistically while Readium reloads.
     try {
-      const parsed = JSON.parse(val);
-      const totalProg = parsed?.locations?.totalProgression;
-      const pos = parsed?.locations?.position;
-      if (typeof totalProg === 'number') {
-        // Optimistic UI: show the approximate page immediately while the
-        // native view animates to the new position.
-        if (positionCount > 0) {
-          const optimistic = Math.max(1, Math.round(totalProg * positionCount));
-          setCurrentPosition(optimistic);
-        } else if (typeof pos === 'number' && pos > 0) {
-          setCurrentPosition(pos);
-        }
-        setCommand(buildCommand('gotoProgression', totalProg));
-      } else if (typeof pos === 'number' && pos > 0) {
-        setCurrentPosition(pos);
-        setCommand(buildCommand('gotoPosition', pos));
-      } else {
-        setCommand(buildCommand('goto', val));
-      }
-    } catch {
-      setCommand(buildCommand('goto', val));
-    }
+      const pos = JSON.parse(val)?.locations?.position;
+      if (typeof pos === 'number' && pos > 0) setCurrentPosition(pos);
+    } catch {}
   }, [resolvedBookId, positionCount]));
 
   // ─── Event handlers ──────────────────────────────────────────────────────

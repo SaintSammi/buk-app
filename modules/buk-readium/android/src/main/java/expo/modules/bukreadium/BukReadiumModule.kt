@@ -10,6 +10,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import org.readium.r2.navigator.epub.EpubDefaults
+import org.readium.r2.navigator.epub.EpubNavigatorFactory
+import org.readium.r2.shared.ExperimentalReadiumApi
 import org.readium.r2.shared.util.toAbsoluteUrl
 import org.readium.r2.shared.util.asset.AssetRetriever
 import org.readium.r2.shared.util.getOrElse
@@ -164,9 +167,19 @@ class BukReadiumModule : Module() {
                         return@launch promise.reject("E_OPEN", "Cannot open publication: $it", null)
                     }
 
-                    // Load positions once so we can inject totalProgression + position
-                    // into each TOC locator. This makes chapter navigation reliable via
-                    // gotoProgression instead of the unreliable raw-href goto.
+                    // Apply the same navigator configuration as the live reader so that
+                    // publication.positions() uses the exact same positions service.
+                    // EpubNavigatorFactory modifies the publication's servicesBuilder in-place;
+                    // without this, positions() returns a different count and all page numbers
+                    // are off by a small but consistent amount.
+                    @OptIn(ExperimentalReadiumApi::class)
+                    try {
+                        EpubNavigatorFactory(
+                            publication = publication,
+                            configuration = EpubNavigatorFactory.Configuration(defaults = EpubDefaults())
+                        )
+                    } catch (_: Exception) {}
+
                     val allPositions = try {
                         publication.positions()
                     } catch (e: Exception) {
