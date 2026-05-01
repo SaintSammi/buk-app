@@ -137,6 +137,20 @@ export default function EpubReaderScreen() {
 
   useFocusEffect(useCallback(() => {
     if (!resolvedBookId) return;
+    // Re-sync bookmarks from AsyncStorage every time the reader regains focus.
+    // This picks up removals made on the bookmarks screen (which writes to
+    // AsyncStorage but can't update the reader's state directly).
+    AsyncStorage.getItem(bookmarksKey(resolvedBookId)).then((val) => {
+      if (val) {
+        try {
+          const parsed = JSON.parse(val);
+          if (Array.isArray(parsed)) setBookmarks(parsed as BookmarkEntry[]);
+        } catch {}
+      } else {
+        setBookmarks([]);
+      }
+    }).catch(() => {});
+
     // Read synchronously from in-memory store (no I/O) so React re-renders and
     // delivers the native command within ~16ms, well before the Kotlin restore
     // timer (300ms). This eliminates the timing race between chapter navigation
@@ -237,9 +251,10 @@ export default function EpubReaderScreen() {
         author: resolvedAuthor,
         toc: JSON.stringify(toc),
         bookmarks: JSON.stringify(bookmarks),
+        themeId: prefs.themeId,
       },
     });
-  }, [router, resolvedBookId, resolvedTitle, resolvedAuthor, toc, bookmarks, flushPosition]);
+  }, [router, resolvedBookId, resolvedTitle, resolvedAuthor, toc, bookmarks, prefs.themeId, flushPosition]);
 
   const handleOpenChapters = useCallback(() => {
     flushPosition();
@@ -256,9 +271,10 @@ export default function EpubReaderScreen() {
         author: resolvedAuthor,
         toc: JSON.stringify(toc),
         currentHref,
+        themeId: prefs.themeId,
       },
     });
-  }, [router, resolvedBookId, resolvedTitle, resolvedAuthor, toc, currentLocator, flushPosition]);
+  }, [router, resolvedBookId, resolvedTitle, resolvedAuthor, toc, currentLocator, prefs.themeId, flushPosition]);
 
   // ─── Derived ─────────────────────────────────────────────────────────────
   const isLoading = !positionLoaded || !prefsLoaded || !resolvedUri;

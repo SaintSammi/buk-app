@@ -15,6 +15,7 @@ import { Image } from 'expo-image';
 import type { EpubTocItem } from '@/modules/buk-readium';
 import type { BookmarkEntry } from './epub-reader';
 import { setPendingNavigation } from '@/services/pending-navigation';
+import { READER_THEMES, type ReaderThemeId } from '@/constants/reader-theme';
 
 const emptyStateIcon = require('@/assets/icons/bookmark empty state icon.svg');
 const bookmarkRemoveIcon = require('@/assets/icons/bookmark-remove.svg');
@@ -38,15 +39,17 @@ function formatDate(timestamp: number): string {
 
 export default function BookmarksScreen() {
   const router = useRouter();
-  const { bookId, title, author, toc: tocParam, bookmarks: bookmarksParam } = useLocalSearchParams<{
+  const { bookId, title, author, toc: tocParam, bookmarks: bookmarksParam, themeId: themeIdParam } = useLocalSearchParams<{
     bookId?: string;
     title?: string;
     author?: string;
     toc?: string;
     bookmarks?: string;
+    themeId?: string;
   }>();
 
   const resolvedBookId = bookId ? String(bookId) : '';
+  const theme = READER_THEMES[(themeIdParam as ReaderThemeId) ?? 'day'] ?? READER_THEMES.day;
 
   const toc: EpubTocItem[] = React.useMemo(() => {
     try { return tocParam ? JSON.parse(String(tocParam)) : []; } catch { return []; }
@@ -106,10 +109,10 @@ export default function BookmarksScreen() {
     return (
       <Pressable style={styles.item} onPress={() => handleItemPress(item.locator)}>
         <View style={styles.itemContent}>
-          <Text style={styles.itemTitle}>
+          <Text style={[styles.itemTitle, { color: theme.text }]}>
             Bookmark on {formatDate(item.savedAt)}
           </Text>
-          <Text style={styles.itemSubtitle}>{subtitle}</Text>
+          <Text style={[styles.itemSubtitle, { color: theme.panelSubtext }]}>{subtitle}</Text>
         </View>
         <Pressable
           style={styles.removeBtn}
@@ -123,15 +126,15 @@ export default function BookmarksScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.screen}>
+    <SafeAreaView style={[styles.screen, { backgroundColor: theme.bg }]}>
       {/* Header */}
       <View style={styles.header}>
-        <Pressable style={styles.backBtn} onPress={() => router.back()}>
-          <Feather name="chevron-left" size={20} color="#FFFFFF" />
+        <Pressable style={[styles.backBtn, { backgroundColor: theme.accent }]} onPress={() => router.back()}>
+          <Feather name="chevron-left" size={20} color={theme.bg} />
         </Pressable>
         <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>Bookmark</Text>
-          <Text style={styles.headerSubtitle} numberOfLines={1}>{title ?? ''}</Text>
+          <Text style={[styles.headerTitle, { color: theme.text }]}>Bookmark</Text>
+          <Text style={[styles.headerSubtitle, { color: theme.panelSubtext }]} numberOfLines={1}>{title ?? ''}</Text>
         </View>
         <View style={styles.headerSpacer} />
       </View>
@@ -139,14 +142,14 @@ export default function BookmarksScreen() {
       {bookmarks.length === 0 ? (
         <View style={styles.emptyState}>
           <Image source={emptyStateIcon} style={styles.emptyIcon} contentFit="contain" />
-          <Text style={styles.emptyText}>No Bookmark Yet</Text>
+          <Text style={[styles.emptyText, { color: theme.text }]}>No Bookmark Yet</Text>
         </View>
       ) : (
         <FlatList
           data={bookmarks}
           keyExtractor={(item, idx) => `${item.savedAt}-${idx}`}
           renderItem={renderItem}
-          ItemSeparatorComponent={() => <View style={styles.divider} />}
+          ItemSeparatorComponent={() => <View style={[styles.divider, { backgroundColor: theme.border }]} />}
           contentContainerStyle={styles.listContent}
         />
       )}
@@ -157,7 +160,6 @@ export default function BookmarksScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
   },
   header: {
     flexDirection: 'row',
@@ -169,7 +171,6 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#121212',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -182,13 +183,11 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     fontFamily: 'Inter_600SemiBold',
-    color: '#2A2929',
   },
   headerSubtitle: {
     fontSize: 12,
     fontWeight: '400',
     fontFamily: 'Inter_400Regular',
-    color: '#8C8C8C',
   },
   headerSpacer: {
     width: 48,
@@ -207,7 +206,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     fontFamily: 'Inter_600SemiBold',
-    color: '#2A2929',
   },
   listContent: {
     paddingHorizontal: 20,
@@ -225,14 +223,12 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '400',
     fontFamily: 'Inter_400Regular',
-    color: '#2A2929',
     lineHeight: 21,
   },
   itemSubtitle: {
     fontSize: 14,
     fontWeight: '400',
     fontFamily: 'Inter_400Regular',
-    color: '#8C8C8C',
     lineHeight: 21,
   },
   removeBtn: {
@@ -244,6 +240,5 @@ const styles = StyleSheet.create({
   },
   divider: {
     height: 1,
-    backgroundColor: 'rgba(0,0,0,0.08)',
   },
 });

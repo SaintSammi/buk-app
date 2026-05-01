@@ -4,10 +4,13 @@ import Animated, {
   FadeIn, 
   FadeOut, 
   LinearTransition, 
+  SlideInDown,
+  SlideOutDown,
   useAnimatedStyle, 
   useSharedValue, 
   withTiming,
-  Easing
+  Easing,
+  interpolate,
 } from 'react-native-reanimated';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,6 +30,7 @@ interface ReaderFloatingControlsProps {
   currentLocator?: string | null;
   isBookmarked?: boolean;
   bookmarkCount?: number;
+  visible?: boolean;
   // Panel props
   title: string;
   author?: string;
@@ -39,6 +43,11 @@ interface ReaderFloatingControlsProps {
   onOpenBookmarks?: () => void;
   onOpenChapters?: () => void;
 }
+
+const ENTER_DURATION = 280;
+const EXIT_DURATION = 220;
+const ENTER_EASING = Easing.bezier(0.33, 1, 0.68, 1);
+const EXIT_EASING = Easing.bezier(0.32, 0, 0.67, 0);
 
 function getGradientColors(bgHex: string): string[] {
   let r = 255, g = 255, b = 255;
@@ -75,11 +84,27 @@ export function ReaderFloatingControls({
   onGoto,
   onOpenBookmarks,
   onOpenChapters,
+  visible = true,
 }: ReaderFloatingControlsProps) {
   const insets = useSafeAreaInsets();
   const theme = READER_THEMES[prefs.themeId];
 
   const gradientStops = getGradientColors(theme.bg);
+
+  // Container slide-up/down animation
+  const controlsAnim = useSharedValue(visible ? 1 : 0);
+  useEffect(() => {
+    if (visible) {
+      controlsAnim.value = withTiming(1, { duration: ENTER_DURATION, easing: ENTER_EASING });
+    } else {
+      controlsAnim.value = withTiming(0, { duration: EXIT_DURATION, easing: EXIT_EASING });
+    }
+  }, [visible]);
+
+  const containerAnimStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(controlsAnim.value, [0, 1], [0, 1]),
+    transform: [{ translateY: interpolate(controlsAnim.value, [0, 1], [120, 0]) }],
+  }));
 
   // Selector Animation
   const tabX = useSharedValue(activeTab === 'settings' ? 1 : 0);
@@ -107,7 +132,7 @@ export function ReaderFloatingControls({
   }));
 
   return (
-    <View style={styles.container} pointerEvents="box-none">
+    <Animated.View style={[styles.container, containerAnimStyle]} pointerEvents={visible ? 'box-none' : 'none'}>
       {/* ── Background: Gradient ────────────────────────────────────────────── */}
       <LinearGradient
         colors={gradientStops}
@@ -128,8 +153,8 @@ export function ReaderFloatingControls({
         {/* Menu/Panel Area */}
         {activeTab === 'settings' && (
           <Animated.View 
-            entering={FadeIn.duration(200)} 
-            exiting={FadeOut.duration(200)}
+            entering={SlideInDown.duration(ENTER_DURATION).easing(ENTER_EASING)}
+            exiting={SlideOutDown.duration(EXIT_DURATION).easing(EXIT_EASING)}
             style={[styles.panelCard, { backgroundColor: theme.panelBg }]}
           >
             <ReaderSettings prefs={prefs} updatePrefs={updatePrefs} />
@@ -137,8 +162,8 @@ export function ReaderFloatingControls({
         )}
         {activeTab === 'contents' && (
           <Animated.View 
-            entering={FadeIn.duration(200)} 
-            exiting={FadeOut.duration(200)}
+            entering={SlideInDown.duration(ENTER_DURATION).easing(ENTER_EASING)}
+            exiting={SlideOutDown.duration(EXIT_DURATION).easing(EXIT_EASING)}
             style={[styles.panelCard, { backgroundColor: theme.panelBg }]}
           >
             <ReaderContents 
@@ -220,7 +245,7 @@ export function ReaderFloatingControls({
         </View>
 
       </Animated.View>
-    </View>
+    </Animated.View>
   );
 }
 

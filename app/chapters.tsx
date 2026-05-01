@@ -11,16 +11,20 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import type { EpubTocItem } from '@/modules/buk-readium';
 import { setPendingNavigation } from '@/services/pending-navigation';
+import { READER_THEMES, type ReaderThemeId } from '@/constants/reader-theme';
 
 export default function ChaptersScreen() {
   const router = useRouter();
-  const { bookId, title, author, toc: tocParam, currentHref } = useLocalSearchParams<{
+  const { bookId, title, author, toc: tocParam, currentHref, themeId: themeIdParam } = useLocalSearchParams<{
     bookId?: string;
     title?: string;
     author?: string;
     toc?: string;
     currentHref?: string;
+    themeId?: string;
   }>();
+
+  const theme = READER_THEMES[(themeIdParam as ReaderThemeId) ?? 'day'] ?? READER_THEMES.day;
 
   const resolvedBookId = bookId ? String(bookId) : '';
   const resolvedCurrentHref = currentHref ? String(currentHref).split('#')[0] : '';
@@ -78,30 +82,30 @@ export default function ChaptersScreen() {
         disabled={!item.locator}
       >
         <View style={styles.itemContent}>
-          <Text style={[styles.itemTitle, isActive && styles.itemTitleActive]}>
+          <Text style={[styles.itemTitle, { color: theme.text }, isActive && styles.itemTitleActive]}>
             {item.title}
           </Text>
           {!!subtitle && (
-            <Text style={styles.itemSubtitle}>{subtitle}</Text>
+            <Text style={[styles.itemSubtitle, { color: theme.panelSubtext }]}>{subtitle}</Text>
           )}
         </View>
         {isActive && (
-          <View style={styles.activeIndicator} />
+          <View style={[styles.activeIndicator, { backgroundColor: theme.text }]} />
         )}
       </Pressable>
     );
   };
 
   return (
-    <SafeAreaView style={styles.screen}>
+    <SafeAreaView style={[styles.screen, { backgroundColor: theme.bg }]}>
       {/* Header */}
       <View style={styles.header}>
-        <Pressable style={styles.backBtn} onPress={() => router.back()}>
-          <Feather name="chevron-left" size={20} color="#FFFFFF" />
+        <Pressable style={[styles.backBtn, { backgroundColor: theme.accent }]} onPress={() => router.back()}>
+          <Feather name="chevron-left" size={20} color={theme.bg} />
         </Pressable>
         <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle}>Chapter</Text>
-          <Text style={styles.headerSubtitle} numberOfLines={1}>{title ?? ''}</Text>
+          <Text style={[styles.headerTitle, { color: theme.text }]}>Chapter</Text>
+          <Text style={[styles.headerSubtitle, { color: theme.panelSubtext }]} numberOfLines={1}>{title ?? ''}</Text>
         </View>
         <View style={styles.headerSpacer} />
       </View>
@@ -110,7 +114,7 @@ export default function ChaptersScreen() {
         data={chaptersWithPages}
         keyExtractor={(row, idx) => `${row.item.href}-${idx}`}
         renderItem={renderItem}
-        ItemSeparatorComponent={() => <View style={styles.divider} />}
+        ItemSeparatorComponent={() => <View style={[styles.divider, { backgroundColor: theme.border }]} />}
         contentContainerStyle={styles.listContent}
       />
     </SafeAreaView>
@@ -120,7 +124,6 @@ export default function ChaptersScreen() {
 const styles = StyleSheet.create({
   screen: {
     flex: 1,
-    backgroundColor: '#FFFFFF',
   },
   header: {
     flexDirection: 'row',
@@ -132,7 +135,6 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: '#121212',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -145,13 +147,11 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     fontFamily: 'Inter_600SemiBold',
-    color: '#2A2929',
   },
   headerSubtitle: {
     fontSize: 12,
     fontWeight: '400',
     fontFamily: 'Inter_400Regular',
-    color: '#8C8C8C',
   },
   headerSpacer: {
     width: 48,
@@ -175,7 +175,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '400',
     fontFamily: 'Inter_400Regular',
-    color: '#2A2929',
     lineHeight: 21,
   },
   itemTitleActive: {
@@ -186,18 +185,15 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '400',
     fontFamily: 'Inter_400Regular',
-    color: '#8C8C8C',
     lineHeight: 21,
   },
   activeIndicator: {
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: '#121212',
     marginLeft: 12,
   },
   divider: {
     height: 1,
-    backgroundColor: 'rgba(0,0,0,0.08)',
   },
 });

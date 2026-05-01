@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { StyleSheet, Pressable, View, Text } from 'react-native';
-import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { Easing, runOnJS, useAnimatedStyle, useSharedValue, withTiming, interpolate } from 'react-native-reanimated';
 import * as Brightness from 'expo-brightness';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -88,6 +88,28 @@ export function ReaderLayout({
 
   const theme = READER_THEMES[prefs.themeId];
 
+  // ── Header animation ─────────────────────────────────────────────────────────
+  const ENTER_DURATION = 280;
+  const EXIT_DURATION = 220;
+  const ENTER_EASING = Easing.bezier(0.33, 1, 0.68, 1);
+  const EXIT_EASING = Easing.bezier(0.32, 0, 0.67, 0);
+
+  const headerAnim = useSharedValue(controlsVisible ? 1 : 0);
+
+  useEffect(() => {
+    if (controlsVisible) {
+      headerAnim.value = withTiming(1, { duration: ENTER_DURATION, easing: ENTER_EASING });
+    } else {
+      headerAnim.value = withTiming(0, { duration: EXIT_DURATION, easing: EXIT_EASING });
+    }
+  }, [controlsVisible]);
+
+  const headerAnimStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(headerAnim.value, [0, 1], [0, 1]),
+    transform: [{ translateY: interpolate(headerAnim.value, [0, 1], [-80, 0]) }],
+    pointerEvents: headerAnim.value === 0 ? 'none' : 'auto',
+  }));
+
   // ── Screen brightness ────────────────────────────────────────────────────────
   const originalBrightnessRef = useRef<number | null>(null);
 
@@ -119,13 +141,11 @@ export function ReaderLayout({
       </Animated.View>
 
       {/* ── Floating Top Header (Minimal) ────────────────────────────────────── */}
-      {controlsVisible && (
-        <View style={[styles.header, { paddingTop: Math.max(insets.top, 14) }]}>
-          <Pressable style={[styles.iconBtn, { backgroundColor: '#121212' }]} onPress={() => router.back()}>
-            <Feather name="chevron-left" size={24} color="#FFFFFF" />
-          </Pressable>
-        </View>
-      )}
+      <Animated.View style={[styles.header, { paddingTop: Math.max(insets.top, 14) }, headerAnimStyle]}>
+        <Pressable style={[styles.iconBtn, { backgroundColor: '#121212' }]} onPress={() => router.back()}>
+          <Feather name="chevron-left" size={24} color="#FFFFFF" />
+        </Pressable>
+      </Animated.View>
 
       {/* ── Bottom Text (Pagination) ─────────────────────────────────────────── */}
       <View style={[styles.bottomPagination, { paddingBottom: Math.max(insets.bottom, 10) }]}>
@@ -135,9 +155,9 @@ export function ReaderLayout({
       </View>
 
       {/* ── Floating Controls Overlay ────────────────────────────────────── */}
-      {controlsVisible && (
-        <ReaderFloatingControls 
-           prefs={prefs}
+      <ReaderFloatingControls 
+         visible={controlsVisible}
+         prefs={prefs}
            updatePrefs={updatePrefs}
            activeTab={activeTab}
            onTabPress={handleTabPress}
@@ -156,7 +176,6 @@ export function ReaderLayout({
            onOpenBookmarks={onOpenBookmarks}
            onOpenChapters={onOpenChapters}
         />
-      )}
     </View>
   );
 }

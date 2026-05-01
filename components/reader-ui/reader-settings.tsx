@@ -24,7 +24,6 @@ export function ReaderSettings({ prefs, updatePrefs }: ReaderSettingsProps) {
           value={prefs.fontSize}
           min={0.8}
           max={2.0}
-          steps={5}
           height={32}
           hideThumb={true}
           onChange={(val) => updatePrefs({ fontSize: val })}
@@ -44,7 +43,6 @@ export function ReaderSettings({ prefs, updatePrefs }: ReaderSettingsProps) {
           value={prefs.brightness}
           min={0.0}
           max={1.0}
-          steps={5}
           height={32}
           hideThumb={true}
           onChange={(val) => updatePrefs({ brightness: val })}
