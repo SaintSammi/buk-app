@@ -55,14 +55,16 @@ export interface BukReadiumCommand {
 }
 
 /** Build a navigation command string ready for the `command` prop */
+let _commandCounter = 0;
 export function buildCommand(type: BukReadiumCommandType, locatorOrProgression?: string | number): string {
+  const id = ++_commandCounter;
   if (type === 'gotoProgression' && typeof locatorOrProgression === 'number') {
-    return JSON.stringify({ id: Date.now(), type, progression: locatorOrProgression } satisfies BukReadiumCommand);
+    return JSON.stringify({ id, type, progression: locatorOrProgression } satisfies BukReadiumCommand);
   }
   if (type === 'gotoPosition' && typeof locatorOrProgression === 'number') {
-    return JSON.stringify({ id: Date.now(), type, position: locatorOrProgression } satisfies BukReadiumCommand);
+    return JSON.stringify({ id, type, position: locatorOrProgression } satisfies BukReadiumCommand);
   }
-  return JSON.stringify({ id: Date.now(), type, locator: locatorOrProgression as string } satisfies BukReadiumCommand);
+  return JSON.stringify({ id, type, locator: locatorOrProgression as string } satisfies BukReadiumCommand);
 }
 
 // ─── Preferences type ─────────────────────────────────────────────────────────

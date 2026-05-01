@@ -221,87 +221,81 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
 
     // ─── EpubNavigatorFragment.Listener (HyperlinkNavigator.Listener) ────────
 
-    // Locator saved in onStop so onResume can restore it instead of using
-    // Readium's built-in initialLocator reset which always goes back to the
-    // position the book was opened at (not where the user navigated to).
+    // Locator saved in onStop so onResume can restore it.
     private var savedLocatorOnStop: Locator? = null
-    // The TARGET locator of the most recent programmatic navigation command.
-    // Set in go/goToProgression/goToPosition, cleared when the Flow confirms
-    // the navigation has landed. Lets onStop capture the correct position even
-    // when navigator.currentLocator.value hasn't updated yet (async WebView ack).
+    // Target locator of the most recent programmatic navigation command.
     private var lastCommandedLocator: Locator? = null
-    // Pending restore runnable — cancelled if a navigation command arrives first.
+    // Pending restore runnable.
     private var restoreRunnable: Runnable? = null
-    // Set by cancelPendingRestore() when a navigation command fires on the JS thread
-    // BEFORE onResume reaches the UI thread. Checked in onResume to skip the restore.
-    // Reset to false in onStop so each stop/resume cycle is independent.
+    // Set when cancelPendingRestore fires before onResume (JS thread ahead of UI thread).
+    // NOT reset in onStop — that would wipe the signal set by useFocusEffect.
     private var restoreCancelled = false
+    // Navigation command buffered while Fragment was STOPPED.
+    // navigator.go() on a stopped WebView is silently ignored by Readium, so we
+    // defer the call to onResume() where the WebView is guaranteed to be active.
+    private var pendingNavAfterResume: Locator? = null
 
-    /** Cancel a pending position restore. Called by BukReadiumView when any navigation command fires. */
+    /** Called by BukReadiumView before executing any navigation command. */
     fun cancelPendingRestore() {
         restoreRunnable?.let { view?.removeCallbacks(it) }
         restoreRunnable = null
         savedLocatorOnStop = null
-        // Mark cancelled so onResume skips the restore even if it hasn't been scheduled yet
-        // (handles the race where handleCommand runs before onResume on the UI thread).
         restoreCancelled = true
-        Log.i(TAG, "cancelPendingRestore: restore cancelled (restoreCancelled=true)")
+        Log.i(TAG, "cancelPendingRestore: restoreCancelled=true")
     }
 
     override fun onStop() {
         super.onStop()
-        // Cancel any leftover restore from a previous resume cycle
         restoreRunnable?.let { view?.removeCallbacks(it) }
         restoreRunnable = null
-        // Reset the cancelled flag — each stop/resume cycle is independent
-        restoreCancelled = false
-        // Prefer lastCommandedLocator (the target of the most recent go() call) over
-        // navigator.currentLocator.value — the StateFlow may not have updated yet if the
-        // WebView hasn't finished processing the navigation (async JS ack).
+        // Do NOT reset restoreCancelled here.
         savedLocatorOnStop = lastCommandedLocator ?: navigator?.currentLocator?.value
-        Log.i(TAG, "onStop: saved locator=${savedLocatorOnStop?.locations?.position} (fromCommand=${lastCommandedLocator != null})")
+        Log.i(TAG, "onStop: saved pos=${savedLocatorOnStop?.locations?.position}")
     }
 
     override fun onStart() {
         super.onStart()
-        Log.i(TAG, "onStart: navigator=${navigator != null}")
-        // Restore is deferred to onResume() + view.post{} so it runs after
-        // EpubNavigatorFragment's own onStart() resets the WebView to initialLocator.
+        Log.i(TAG, "onStart")
     }
 
     override fun onResume() {
         super.onResume()
+        val cancelled = restoreCancelled
+        restoreCancelled = false
+
+        // A chapter/bookmark navigation was buffered while the Fragment was STOPPED.
+        // Execute it now — the WebView is active and will process go().
+        // This takes priority over everything else.
+        val pendingNav = pendingNavAfterResume
+        if (pendingNav != null) {
+            pendingNavAfterResume = null
+            savedLocatorOnStop = null
+            Log.i(TAG, "onResume: executing buffered nav to pos=${pendingNav.locations?.position}")
+            view?.post { lifecycleScope.launch { navigator?.go(pendingNav) } }
+            return
+        }
+
         val saved = savedLocatorOnStop ?: run {
             Log.i(TAG, "onResume: no saved locator")
             return
         }
-        // A navigation command fired on the JS thread before onResume reached the UI thread.
-        if (restoreCancelled) {
-            Log.i(TAG, "onResume: restore pre-cancelled by incoming navigation command, skipping")
-            restoreCancelled = false
+
+        if (cancelled) {
+            Log.i(TAG, "onResume: restore pre-cancelled, skipping")
             savedLocatorOnStop = null
             return
         }
+
         savedLocatorOnStop = null
-        Log.i(TAG, "onResume: scheduling restore to pos=${saved.locations?.position}")
+        Log.i(TAG, "onResume: scheduling restore to pos=${saved.locations?.position} in 300ms")
         val v = view ?: return
         val r = Runnable {
             restoreRunnable = null
-            if (restoreCancelled) {
-                Log.i(TAG, "onResume restore runnable: cancelled after post, skipping")
-                restoreCancelled = false
-                return@Runnable
-            }
-            Log.i(TAG, "onResume restore: firing navigator.go pos=${saved.locations?.position}")
+            if (restoreCancelled) { restoreCancelled = false; return@Runnable }
+            Log.i(TAG, "onResume restore: firing go")
             lifecycleScope.launch { navigator?.go(saved) }
         }
         restoreRunnable = r
-        // 300ms delay gives the JS bridge enough time to deliver a pending chapter/bookmark
-        // navigation command (AsyncStorage read + React render + bridge = ~50-150ms typical).
-        // Combined with restoreCancelled, this handles both orderings of the UI/JS race:
-        //   - command arrives before onResume: restoreCancelled=true, restore is skipped
-        //   - command arrives during 300ms window: cancelPendingRestore() removes this runnable
-        //   - no command within 300ms: restore fires normally (back from chapters without selecting)
         v.postDelayed(r, 300)
     }
 
@@ -320,31 +314,34 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
         lifecycleScope.launch { navigator?.goBackward() }
     }
 
-    fun go(locator: Locator) {
-        lastCommandedLocator = locator
-        lifecycleScope.launch { navigator?.go(locator) }
+    /** Execute a navigation. If the Fragment is not yet RESUMED, buffers until onResume(). */
+    private fun navigateTo(target: Locator) {
+        lastCommandedLocator = target
+        if (lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) {
+            lifecycleScope.launch { navigator?.go(target) }
+        } else {
+            // Fragment is STOPPED or STARTED — WebView won't process go() yet.
+            // Buffer it; onResume() will execute it after the WebView is active.
+            pendingNavAfterResume = target
+            Log.i(TAG, "navigateTo: buffered (state=${lifecycle.currentState}) pos=${target.locations?.position}")
+        }
     }
 
+    fun go(locator: Locator) { navigateTo(locator) }
+
     fun goToProgression(totalProgression: Double) {
-        // Use cachedPositions (already loaded, no suspend) and lifecycleScope
-        // (Fragment-level, never cancelled by view destroy/create cycles) so
-        // that navigation commands always execute even during transitions.
         val positions = cachedPositions
         if (positions.isEmpty()) return
         val targetIdx = (totalProgression * (positions.size - 1)).roundToInt()
             .coerceIn(0, positions.size - 1)
-        val target = positions[targetIdx]
-        lastCommandedLocator = target
-        lifecycleScope.launch { navigator?.go(target) }
+        navigateTo(positions[targetIdx])
     }
 
     fun goToPosition(position: Int) {
         val positions = cachedPositions
         if (positions.isEmpty()) return
         val idx = (position - 1).coerceIn(0, positions.size - 1)
-        val target = positions[idx]
-        lastCommandedLocator = target
-        lifecycleScope.launch { navigator?.go(target) }
+        navigateTo(positions[idx])
     }
 
     fun submitPreferences(preferences: EpubPreferences) {

@@ -143,6 +143,13 @@ export default function EpubReaderScreen() {
     // and the onResume position restore.
     const val = consumePendingNavigation(resolvedBookId);
     if (!val) return;
+    // Update currentLocator NOW so initialLocator prop is already the target
+    // locator by the time the native view (which fully detaches/recreates on
+    // every stack navigation) calls mountEpubNavigator. The book then opens
+    // directly at the chapter/bookmark page via initialLocator — no go() needed.
+    // The go() command below is sent as a fallback for cases where the view
+    // does NOT recreate (e.g. if detachPreviousScreen ever works as intended).
+    setCurrentLocator(val);
     try {
       const parsed = JSON.parse(val);
       const totalProg = parsed?.locations?.totalProgression;
