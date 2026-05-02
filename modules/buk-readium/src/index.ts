@@ -147,6 +147,15 @@ export interface EpubTocItem {
   locator?: string;
 }
 
+export interface EpubSearchResult {
+  /** Serialised Readium Locator JSON — pass to setPendingNavigation to navigate */
+  locator: string;
+  /** Surrounding text with the match in the middle */
+  snippet: string;
+  /** Title of the chapter/section containing the match */
+  chapterTitle: string;
+}
+
 /**
  * Extract the cover image from an EPUB file.
  * Returns a `file://` URI to a cached JPEG, or `null` if no cover is found.
@@ -161,6 +170,10 @@ export async function extractEpubMetadata(src: string): Promise<EpubMetadata | n
 
 export async function extractEpubToc(src: string): Promise<EpubTocItem[] | null> {
   return NativeBukReadium.extractEpubToc(src);
+}
+
+export async function searchEpub(src: string, query: string): Promise<EpubSearchResult[]> {
+  return NativeBukReadium.searchEpub(src, query);
 }
 
 export { BukReadiumView };

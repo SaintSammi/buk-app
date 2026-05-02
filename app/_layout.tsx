@@ -44,6 +44,7 @@ export default function RootLayout() {
           <Stack.Screen name="index" options={{ headerShown: false }} />
           <Stack.Screen name="bookmarks" options={{ headerShown: false, detachPreviousScreen: false }} />
           <Stack.Screen name="chapters" options={{ headerShown: false, detachPreviousScreen: false }} />
+          <Stack.Screen name="search" options={{ headerShown: false, detachPreviousScreen: false }} />
         </Stack>
         <StatusBar style="auto" />
       </ThemeProvider>

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { StyleSheet, View, Pressable, Text, Alert } from 'react-native';
+import { StyleSheet, View, Pressable, Text } from 'react-native';
 import Animated, { 
   FadeIn, 
   FadeOut, 
@@ -42,6 +42,7 @@ interface ReaderFloatingControlsProps {
   onGoto?: (locator: string) => void;
   onOpenBookmarks?: () => void;
   onOpenChapters?: () => void;
+  onOpenSearch?: () => void;
 }
 
 const ENTER_DURATION = 280;
@@ -84,6 +85,7 @@ export function ReaderFloatingControls({
   onGoto,
   onOpenBookmarks,
   onOpenChapters,
+  onOpenSearch,
   visible = true,
 }: ReaderFloatingControlsProps) {
   const insets = useSafeAreaInsets();
@@ -127,7 +129,7 @@ export function ReaderFloatingControls({
   }, [activeTab]);
 
   const indicatorStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: tabX.value * 100 + '%' }], 
+    transform: [{ translateX: `${tabX.value * 100}%` as `${number}%` }], 
     opacity: activeTab === 'none' ? 0 : 1,
   }));
 
@@ -135,7 +137,7 @@ export function ReaderFloatingControls({
     <Animated.View style={[styles.container, containerAnimStyle]} pointerEvents={visible ? 'box-none' : 'none'}>
       {/* ── Background: Gradient ────────────────────────────────────────────── */}
       <LinearGradient
-        colors={gradientStops}
+        colors={gradientStops as [string, string, ...string[]]}
         locations={[0, 0.3462, 0.476, 0.6154, 1]}
         style={StyleSheet.absoluteFillObject}
         start={{ x: 0, y: 0 }}
@@ -207,7 +209,7 @@ export function ReaderFloatingControls({
               style={[
                 styles.activeIndicator, 
                 { backgroundColor: theme.pillActive },
-                indicatorStyle
+                indicatorStyle as any
               ]} 
             />
 
@@ -233,7 +235,7 @@ export function ReaderFloatingControls({
           {/* Search */}
           <Pressable 
             style={[styles.iconButton, { backgroundColor: theme.pillActive }]}
-            onPress={() => Alert.alert("Search", "Search functionality coming soon!")}
+            onPress={() => onOpenSearch?.()}
           >
             <Image
               source={require('@/assets/icons/search.svg')}

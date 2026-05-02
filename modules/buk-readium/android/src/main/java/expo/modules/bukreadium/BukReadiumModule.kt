@@ -13,6 +13,7 @@ import kotlinx.coroutines.withContext
 import org.readium.r2.navigator.epub.EpubDefaults
 import org.readium.r2.navigator.epub.EpubNavigatorFactory
 import org.readium.r2.shared.ExperimentalReadiumApi
+import org.readium.r2.shared.publication.services.search.search
 import org.readium.r2.shared.util.toAbsoluteUrl
 import org.readium.r2.shared.util.asset.AssetRetriever
 import org.readium.r2.shared.util.getOrElse
@@ -229,6 +230,96 @@ class BukReadiumModule : Module() {
                 } catch (e: Exception) {
                     Log.e(TAG, "extractEpubToc failed", e)
                     promise.resolve(null)
+                }
+            }
+        }
+
+        AsyncFunction("searchEpub") { src: String, query: String, promise: Promise ->
+            val context: Context = appContext.reactContext
+                ?: return@AsyncFunction promise.reject("E_NO_CONTEXT", "No React context", null)
+
+            moduleScope.launch {
+                try {
+                    val httpClient = DefaultHttpClient()
+                    val assetRetriever = AssetRetriever(context.contentResolver, httpClient)
+                    val opener = PublicationOpener(
+                        publicationParser = DefaultPublicationParser(
+                            context = context,
+                            httpClient = httpClient,
+                            assetRetriever = assetRetriever,
+                            pdfFactory = null
+                        )
+                    )
+
+                    val url = android.net.Uri.parse(src).toAbsoluteUrl()
+                        ?: return@launch promise.reject("E_BAD_URI", "Cannot parse URI: $src", null)
+
+                    val asset = assetRetriever.retrieve(url).getOrElse {
+                        return@launch promise.reject("E_ASSET", "Cannot retrieve asset: $it", null)
+                    }
+
+                    val publication = opener.open(asset, allowUserInteraction = false).getOrElse {
+                        asset.close()
+                        return@launch promise.reject("E_OPEN", "Cannot open publication: $it", null)
+                    }
+
+                    @OptIn(ExperimentalReadiumApi::class)
+                    val iterator = publication.search(query)
+
+                    val results = org.json.JSONArray()
+
+                    if (iterator != null) {
+                        var count = 0
+                        while (count < 100) {
+                            val page = iterator.next().getOrNull() ?: break
+                            for (locator in page.locators) {
+                                val before = locator.text.before?.takeLast(60) ?: ""
+                                val highlight = locator.text.highlight ?: ""
+                                val after = locator.text.after?.take(60) ?: ""
+                                val snippet = "$before$highlight$after".trim()
+
+                                val locJson = org.json.JSONObject().apply {
+                                    put("href", locator.href.toString())
+                                    put("type", "application/xhtml+xml")
+                                    val locs = org.json.JSONObject()
+                                    locator.locations.totalProgression?.let { locs.put("totalProgression", it) }
+                                    locator.locations.position?.let { locs.put("position", it) }
+                                    locator.locations.progression?.let { locs.put("progression", it) }
+                                    if (locs.length() > 0) put("locations", locs)
+                                    val text = org.json.JSONObject()
+                                    if (before.isNotEmpty()) text.put("before", before)
+                                    if (highlight.isNotEmpty()) text.put("highlight", highlight)
+                                    if (after.isNotEmpty()) text.put("after", after)
+                                    if (text.length() > 0) put("text", text)
+                                }
+
+                                val item = org.json.JSONObject().apply {
+                                    put("locator", locJson.toString())
+                                    put("snippet", snippet)
+                                    put("chapterTitle", locator.title ?: "")
+                                }
+                                results.put(item)
+                                count++
+                            }
+                        }
+                        iterator.close()
+                    }
+
+                    publication.close()
+
+                    // Convert JSONArray to List<Map<String,Any?>> for Expo bridge
+                    val list = (0 until results.length()).map { i ->
+                        val obj = results.getJSONObject(i)
+                        mapOf(
+                            "locator" to obj.getString("locator"),
+                            "snippet" to obj.getString("snippet"),
+                            "chapterTitle" to obj.getString("chapterTitle")
+                        )
+                    }
+                    promise.resolve(list)
+                } catch (e: Exception) {
+                    Log.e(TAG, "searchEpub failed", e)
+                    promise.resolve(emptyList<Map<String, Any?>>())
                 }
             }
         }

@@ -276,6 +276,19 @@ export default function EpubReaderScreen() {
     });
   }, [router, resolvedBookId, resolvedTitle, resolvedAuthor, toc, currentLocator, prefs.themeId, flushPosition]);
 
+  const handleOpenSearch = useCallback(() => {
+    flushPosition();
+    setControlsVisible(false);
+    router.push({
+      pathname: '/search',
+      params: {
+        bookId: resolvedBookId,
+        fileUri: resolvedUri,
+        themeId: prefs.themeId,
+      },
+    });
+  }, [router, resolvedBookId, resolvedUri, prefs.themeId, flushPosition]);
+
   // ─── Derived ─────────────────────────────────────────────────────────────
   const isLoading = !positionLoaded || !prefsLoaded || !resolvedUri;
   const theme = READER_THEMES[prefs.themeId];
@@ -321,6 +334,7 @@ export default function EpubReaderScreen() {
       onSeek={(val) => setCommand(buildCommand('gotoProgression', val))}
       onOpenBookmarks={handleOpenBookmarks}
       onOpenChapters={handleOpenChapters}
+      onOpenSearch={handleOpenSearch}
     >
       <Stack.Screen options={{ headerShown: false }} />
 

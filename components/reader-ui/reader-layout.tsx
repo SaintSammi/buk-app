@@ -28,6 +28,7 @@ interface ReaderLayoutProps {
   onSeek?: (progression: number) => void;
   onOpenBookmarks?: () => void;
   onOpenChapters?: () => void;
+  onOpenSearch?: () => void;
 }
 
 export function ReaderLayout({
@@ -49,6 +50,7 @@ export function ReaderLayout({
   onSeek,
   onOpenBookmarks,
   onOpenChapters,
+  onOpenSearch,
 }: ReaderLayoutProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -175,6 +177,7 @@ export function ReaderLayout({
            onGoto={onGoto}
            onOpenBookmarks={onOpenBookmarks}
            onOpenChapters={onOpenChapters}
+           onOpenSearch={onOpenSearch}
         />
     </View>
   );
