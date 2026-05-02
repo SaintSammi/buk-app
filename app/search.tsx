@@ -13,17 +13,18 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { searchEpub, type EpubSearchResult } from '@/modules/buk-readium';
 import { setPendingNavigation } from '@/services/pending-navigation';
-import { READER_THEMES, type ReaderThemeId } from '@/constants/reader-theme';
+import { READER_THEMES } from '@/constants/reader-theme';
+import { useReaderPrefs } from '@/hooks/use-reader-prefs';
 
 export default function SearchScreen() {
   const router = useRouter();
-  const { bookId, fileUri, themeId: themeIdParam } = useLocalSearchParams<{
+  const { bookId, fileUri } = useLocalSearchParams<{
     bookId?: string;
     fileUri?: string;
-    themeId?: string;
   }>();
 
-  const theme = READER_THEMES[(themeIdParam as ReaderThemeId) ?? 'day'] ?? READER_THEMES.day;
+  const { prefs } = useReaderPrefs();
+  const theme = READER_THEMES[prefs.themeId] ?? READER_THEMES.day;
   const resolvedBookId = bookId ? String(bookId) : '';
   const resolvedFileUri = fileUri ? String(fileUri) : '';
 

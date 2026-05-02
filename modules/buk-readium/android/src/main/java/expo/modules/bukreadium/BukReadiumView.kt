@@ -256,6 +256,7 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
             if (host == null) {
                 pendingPreferences = prefs
             } else {
+                pendingPreferences = prefs  // always keep in sync for view recreation
                 host.submitPreferences(prefs)
             }
         } catch (e: Exception) {

@@ -284,10 +284,9 @@ export default function EpubReaderScreen() {
       params: {
         bookId: resolvedBookId,
         fileUri: resolvedUri,
-        themeId: prefs.themeId,
       },
     });
-  }, [router, resolvedBookId, resolvedUri, prefs.themeId, flushPosition]);
+  }, [router, resolvedBookId, resolvedUri, flushPosition]);
 
   // ─── Derived ─────────────────────────────────────────────────────────────
   const isLoading = !positionLoaded || !prefsLoaded || !resolvedUri;
