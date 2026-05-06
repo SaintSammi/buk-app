@@ -325,7 +325,8 @@ class BukReadiumModule : Module() {
         }
 
         View(BukReadiumView::class) {
-            Events("onBukReady", "onBukLocation", "onBukTap", "onBukError")
+            Events("onBukReady", "onBukLocation", "onBukTap", "onBukError",
+                   "onBukSelection", "onBukHighlightTap", "onBukHighlightApplied")
 
             /**
              * file:// or content:// URI of the publication to open.
@@ -357,6 +358,10 @@ class BukReadiumModule : Module() {
              */
             Prop("command") { view: BukReadiumView, cmd: String? ->
                 view.handleCommand(cmd)
+            }
+
+            Prop("highlightCommand") { view: BukReadiumView, cmd: String? ->
+                view.handleHighlightCommand(cmd)
             }
 
             /**

@@ -62,10 +62,13 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
 
     // ─── Events ──────────────────────────────────────────────────────────────
 
-    internal val onBukReady     by EventDispatcher<Map<String, Any?>>()
-    internal val onBukLocation  by EventDispatcher<Map<String, Any?>>()
-    internal val onBukTap       by EventDispatcher<Map<String, Any?>>()
-    internal val onBukError     by EventDispatcher<Map<String, Any?>>()
+    internal val onBukReady          by EventDispatcher<Map<String, Any?>>()
+    internal val onBukLocation         by EventDispatcher<Map<String, Any?>>()
+    internal val onBukTap              by EventDispatcher<Map<String, Any?>>()
+    internal val onBukError            by EventDispatcher<Map<String, Any?>>()
+    internal val onBukSelection        by EventDispatcher<Map<String, Any?>>()
+    internal val onBukHighlightTap     by EventDispatcher<Map<String, Any?>>()
+    internal val onBukHighlightApplied by EventDispatcher<Map<String, Any?>>()
 
     // ─── Internal state ───────────────────────────────────────────────────────
 
@@ -235,6 +238,22 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
     fun setContentInsetTop(insetDp: Float) {
         val px = (insetDp * resources.displayMetrics.density).toInt()
         hostFragment?.setContentInsetTopPx(px)
+    }
+
+    fun handleHighlightCommand(json: String?) {
+        if (json.isNullOrEmpty()) return
+        val host = hostFragment ?: return
+        try {
+            val obj = JSONObject(json)
+            when (obj.optString("action")) {
+                "apply"  -> host.applyHighlight(obj.getString("id"), obj.getString("colorHex"))
+                "change" -> host.changeHighlight(obj.getString("id"), obj.getString("colorHex"))
+                "remove" -> host.removeHighlight(obj.getString("id"))
+                "setAll" -> host.setAllHighlights(obj.getString("highlights"))
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "handleHighlightCommand: error", e)
+        }
     }
 
     fun applyPreferences(json: String?) {
@@ -445,6 +464,35 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
         override fun onError(message: String) {
             dispatchError(message)
         }
+
+        override fun onSelectionChanged(selectedText: String, x: Float, y: Float, width: Float, height: Float) {
+            dispatchEvent("onBukSelection", mapOf(
+                "selectedText" to selectedText,
+                "x" to x.toDouble(), "y" to y.toDouble(),
+                "width" to width.toDouble(), "height" to height.toDouble()
+            ))
+        }
+
+        override fun onSelectionCleared() {
+            dispatchEvent("onBukSelection", mapOf(
+                "selectedText" to "",
+                "x" to 0.0, "y" to 0.0, "width" to 0.0, "height" to 0.0
+            ))
+        }
+
+        override fun onHighlightTap(id: String, colorHex: String, x: Float, y: Float, width: Float, height: Float) {
+            dispatchEvent("onBukHighlightTap", mapOf(
+                "id" to id, "colorHex" to colorHex,
+                "x" to x.toDouble(), "y" to y.toDouble(),
+                "width" to width.toDouble(), "height" to height.toDouble()
+            ))
+        }
+
+        override fun onHighlightApplied(id: String, locatorJson: String, colorHex: String) {
+            dispatchEvent("onBukHighlightApplied", mapOf(
+                "id" to id, "locatorJson" to locatorJson, "colorHex" to colorHex
+            ))
+        }
     }
 
     // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -459,10 +507,13 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
         mainHandler.post {
             try {
                 when (eventName) {
-                    "onBukReady"    -> onBukReady(payload)
-                    "onBukLocation" -> onBukLocation(payload)
-                    "onBukTap"      -> onBukTap(payload)
-                    "onBukError"    -> onBukError(payload)
+                    "onBukReady"           -> onBukReady(payload)
+                    "onBukLocation"        -> onBukLocation(payload)
+                    "onBukTap"             -> onBukTap(payload)
+                    "onBukError"           -> onBukError(payload)
+                    "onBukSelection"       -> onBukSelection(payload)
+                    "onBukHighlightTap"    -> onBukHighlightTap(payload)
+                    "onBukHighlightApplied"-> onBukHighlightApplied(payload)
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "dispatchEvent $eventName failed: $e")

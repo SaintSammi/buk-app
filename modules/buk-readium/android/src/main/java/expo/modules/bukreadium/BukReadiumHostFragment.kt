@@ -1,10 +1,12 @@
 package expo.modules.bukreadium
 
+import android.graphics.Color
 import android.os.Bundle
 import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.JavascriptInterface
 import android.webkit.WebView
 import android.widget.FrameLayout
 import androidx.fragment.app.Fragment
@@ -12,8 +14,12 @@ import androidx.fragment.app.commitNow
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+import org.readium.r2.navigator.DecorableNavigator
+import org.readium.r2.navigator.Decoration
+import org.readium.r2.navigator.SelectableNavigator
 import org.readium.r2.navigator.epub.EpubNavigatorFactory
 import org.readium.r2.navigator.epub.EpubNavigatorFragment
 import org.readium.r2.navigator.epub.EpubPreferences
@@ -49,6 +55,10 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
         fun onLocationChanged(locator: Locator, position: Int, positionCount: Int, progression: Double)
         fun onTap(x: Float, y: Float)
         fun onError(message: String)
+        fun onSelectionChanged(selectedText: String, x: Float, y: Float, width: Float, height: Float)
+        fun onSelectionCleared()
+        fun onHighlightTap(id: String, colorHex: String, x: Float, y: Float, width: Float, height: Float)
+        fun onHighlightApplied(id: String, locatorJson: String, colorHex: String)
     }
 
     var viewListener: Listener? = null
@@ -68,6 +78,11 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
     // CSS top inset (px) to inject into the epub WebView content
     private var contentInsetTopPx: Int = 0
 
+    // ─── Highlight / selection state ──────────────────────────────────────────
+    private var selectionBridgeInstalled = false
+    private var pendingSelectionLocator: Locator? = null
+    private val highlightDecorations = mutableMapOf<String, Decoration>()
+
     fun setContentInsetTopPx(px: Int) {
         contentInsetTopPx = px
         injectInsetCss()
@@ -81,6 +96,186 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
             findWebView(view.getChildAt(i))?.let { return it }
         }
         return null
+    }
+
+    // ─── Selection JS bridge ─────────────────────────────────────────────────
+
+    private inner class BukSelectionBridge {
+        @JavascriptInterface
+        fun selected(text: String, x: Float, y: Float, width: Float, height: Float) {
+            lifecycleScope.launch(Dispatchers.Main) {
+                pendingSelectionLocator = (navigator as? SelectableNavigator)?.currentSelection()?.locator
+                viewListener?.onSelectionChanged(text, x, y, width, height)
+            }
+        }
+        @JavascriptInterface
+        fun cleared() {
+            lifecycleScope.launch(Dispatchers.Main) {
+                pendingSelectionLocator = null
+                viewListener?.onSelectionCleared()
+            }
+        }
+    }
+
+    private fun setupHighlightBridgeIfNeeded() {
+        if (selectionBridgeInstalled) return
+        val webView = findWebView(navigator?.view) ?: return
+        selectionBridgeInstalled = true
+
+        webView.addJavascriptInterface(BukSelectionBridge(), "BukSel")
+
+        // Listen for taps on existing highlight decorations
+        (navigator as? DecorableNavigator)?.addDecorationListener(
+            "highlights",
+            object : DecorableNavigator.Listener {
+                override fun onDecorationActivated(event: DecorableNavigator.OnActivatedEvent): Boolean {
+                    val colorHex = event.decoration.extras["colorHex"] as? String ?: return false
+                    val rect = event.rect ?: return false
+                    val density = resources.displayMetrics.density
+                    lifecycleScope.launch(Dispatchers.Main) {
+                        viewListener?.onHighlightTap(
+                            event.decoration.id, colorHex,
+                            rect.left / density, rect.top / density,
+                            rect.width() / density, rect.height() / density
+                        )
+                    }
+                    return true
+                }
+            }
+        )
+    }
+
+    private fun injectSelectionJs() {
+        val webView = findWebView(navigator?.view) ?: return
+        // language=JavaScript
+        // Readium renders EPUB chapters in iframes; selectionchange fires on the iframe's
+        // document, not the top-level one. BukSel JavascriptInterface is only on the main
+        // window, but closures defined in the main-frame IIFE keep that reference.
+        val script = """
+            (function(){
+              var BukSel = window.BukSel;
+              if(!BukSel) return;
+
+              function watchDoc(doc, offX, offY) {
+                if(!doc || doc.__bukSelWatch) return;
+                doc.__bukSelWatch = true;
+                var targetWin = doc.defaultView;
+                var t = null;
+                doc.addEventListener('selectionchange', function() {
+                  clearTimeout(t);
+                  t = setTimeout(function() {
+                    try {
+                      var s = targetWin.getSelection();
+                      if(!s || s.rangeCount===0 || !s.toString().trim()) {
+                        BukSel.cleared(); return;
+                      }
+                      var r = s.getRangeAt(0).getBoundingClientRect();
+                      BukSel.selected(s.toString().trim(),
+                        r.left+offX, r.top+offY, r.width, r.height);
+                    } catch(e) {}
+                  }, 200);
+                });
+                doc.addEventListener('contextmenu', function(e){
+                  e.preventDefault(); e.stopPropagation();
+                }, true);
+              }
+
+              function installAll() {
+                watchDoc(document, 0, 0);
+                var frames = document.querySelectorAll('iframe');
+                for(var i=0; i<frames.length; i++) {
+                  try {
+                    var fr = frames[i];
+                    var rect = fr.getBoundingClientRect();
+                    watchDoc(fr.contentDocument, rect.left, rect.top);
+                  } catch(e) {}
+                }
+              }
+
+              installAll();
+
+              if(!window.__bukSelObserver) {
+                window.__bukSelObserver = true;
+                new MutationObserver(installAll)
+                  .observe(document.documentElement, {childList:true, subtree:true});
+              }
+            })();
+        """.trimIndent()
+        webView.post { webView.evaluateJavascript(script, null) }
+    }
+
+    // ─── Public highlight API ─────────────────────────────────────────────────
+
+    fun applyHighlight(id: String, colorHex: String) {
+        val locator = pendingSelectionLocator ?: return
+        pendingSelectionLocator = null
+        val color = try { Color.parseColor(colorHex) } catch (_: Exception) { return }
+        val decoration = Decoration(
+            id = id,
+            locator = locator,
+            style = Decoration.Style.Highlight(tint = color),
+            extras = mapOf("colorHex" to colorHex)
+        )
+        highlightDecorations[id] = decoration
+        lifecycleScope.launch {
+            (navigator as? DecorableNavigator)?.applyDecorations(
+                highlightDecorations.values.toList(), "highlights"
+            )
+        }
+        (navigator as? SelectableNavigator)?.clearSelection()
+        viewListener?.onHighlightApplied(id, locator.toJSON().toString(), colorHex)
+    }
+
+    fun changeHighlight(id: String, colorHex: String) {
+        val existing = highlightDecorations[id] ?: return
+        val color = try { Color.parseColor(colorHex) } catch (_: Exception) { return }
+        highlightDecorations[id] = existing.copy(
+            style = Decoration.Style.Highlight(tint = color),
+            extras = mapOf("colorHex" to colorHex)
+        )
+        lifecycleScope.launch {
+            (navigator as? DecorableNavigator)?.applyDecorations(
+                highlightDecorations.values.toList(), "highlights"
+            )
+        }
+    }
+
+    fun removeHighlight(id: String) {
+        highlightDecorations.remove(id)
+        lifecycleScope.launch {
+            (navigator as? DecorableNavigator)?.applyDecorations(
+                highlightDecorations.values.toList(), "highlights"
+            )
+        }
+    }
+
+    fun setAllHighlights(json: String) {
+        highlightDecorations.clear()
+        try {
+            val arr = org.json.JSONArray(json)
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                val id = obj.getString("id")
+                val locator = Locator.fromJSON(
+                    org.json.JSONObject(obj.getString("locatorJson"))
+                ) ?: continue
+                val colorHex = obj.getString("colorHex")
+                val color = try { Color.parseColor(colorHex) } catch (_: Exception) { continue }
+                highlightDecorations[id] = Decoration(
+                    id = id,
+                    locator = locator,
+                    style = Decoration.Style.Highlight(tint = color),
+                    extras = mapOf("colorHex" to colorHex)
+                )
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "setAllHighlights: parse error", e)
+        }
+        lifecycleScope.launch {
+            (navigator as? DecorableNavigator)?.applyDecorations(
+                highlightDecorations.values.toList(), "highlights"
+            )
+        }
     }
 
     private fun injectInsetCss() {
@@ -215,6 +410,8 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
                 }
                 viewListener?.onLocationChanged(locator, position, positionCount, progression)
                 injectInsetCss()
+                setupHighlightBridgeIfNeeded()
+                injectSelectionJs()
             }
         }
     }

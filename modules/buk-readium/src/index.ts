@@ -38,6 +38,42 @@ export interface BukErrorEvent {
   };
 }
 
+export interface BukSelectionEvent {
+  nativeEvent: {
+    selectedText: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+}
+
+export interface BukHighlightTapEvent {
+  nativeEvent: {
+    id: string;
+    colorHex: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+}
+
+export interface BukHighlightAppliedEvent {
+  nativeEvent: {
+    id: string;
+    locatorJson: string;
+    colorHex: string;
+  };
+}
+
+export interface HighlightEntry {
+  id: string;
+  locatorJson: string;
+  colorHex: string;
+  createdAt: number;
+}
+
 // ─── Command type ─────────────────────────────────────────────────────────────
 
 export type BukReadiumCommandType = 'next' | 'prev' | 'goto' | 'gotoProgression' | 'gotoPosition';
@@ -124,6 +160,18 @@ export interface BukReadiumViewProps {
 
   /** Fired on any error opening or rendering the publication */
   onBukError?: (event: BukErrorEvent) => void;
+
+  /** Fired when text is selected (selectedText empty = cleared) */
+  onBukSelection?: (event: BukSelectionEvent) => void;
+
+  /** Fired when the user taps an existing highlight */
+  onBukHighlightTap?: (event: BukHighlightTapEvent) => void;
+
+  /** Fired after a highlight is applied natively (returns authoritative locator) */
+  onBukHighlightApplied?: (event: BukHighlightAppliedEvent) => void;
+
+  /** Serialised highlight command JSON: {action, id, colorHex?, highlights?} */
+  highlightCommand?: string;
 }
 
 // Module name must match Name("BukReadium") in BukReadiumModule.kt

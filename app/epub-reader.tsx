@@ -14,7 +14,12 @@ import {
   type BukLocationEvent,
   type BukTapEvent,
   type BukErrorEvent,
+  type BukSelectionEvent,
+  type BukHighlightTapEvent,
+  type BukHighlightAppliedEvent,
+  type HighlightEntry,
 } from '@/modules/buk-readium';
+import { HighlightToolbar } from '@/components/reader-ui/highlight-toolbar';
 import { ReaderLayout } from '@/components/reader-ui/reader-layout';
 import { useReaderPrefs, prefsToReadium } from '@/hooks/use-reader-prefs';
 import { READER_THEMES } from '@/constants/reader-theme';
@@ -25,6 +30,7 @@ function locatorKey(bookId: string) { return `readium-locator:${bookId}`; }
 function progressKey(bookId: string) { return `progress-pct:${bookId}`; }
 function bookmarksKey(bookId: string) { return `readium-bookmarks:${bookId}`; }
 function statsKey(bookId: string) { return `book-stats:${bookId}`; }
+function highlightsKey(bookId: string) { return `readium-highlights:${bookId}`; }
 
 export type BookmarkEntry = { locator: string; savedAt: number };
 
@@ -69,6 +75,17 @@ export default function EpubReaderScreen() {
   const [bookmarks, setBookmarks] = useState<BookmarkEntry[]>([]);
   const [toc, setToc] = useState<EpubTocItem[]>([]);
   const [currentLocator, setCurrentLocator] = useState<string | null>(null);
+
+  // ─── Highlight state ────────────────────────────────────────────────────
+  const highlightsRef = useRef<HighlightEntry[]>([]);
+  const [highlights, setHighlights] = useState<HighlightEntry[]>([]);
+  const [highlightCommand, setHighlightCommand] = useState('');
+  const [selectionInfo, setSelectionInfo] = useState<{
+    text: string; x: number; y: number; w: number; h: number;
+  } | null>(null);
+  const [highlightTapInfo, setHighlightTapInfo] = useState<{
+    id: string; colorHex: string; x: number; y: number; w: number; h: number;
+  } | null>(null);
   
   useKeepAwake();
 
@@ -112,6 +129,19 @@ export default function EpubReaderScreen() {
         if (res) setToc(res);
       });
     }
+
+    // Load persisted highlights
+    AsyncStorage.getItem(highlightsKey(resolvedBookId)).then((val) => {
+      if (val) {
+        try {
+          const parsed = JSON.parse(val);
+          if (Array.isArray(parsed)) {
+            highlightsRef.current = parsed as HighlightEntry[];
+            setHighlights(parsed as HighlightEntry[]);
+          }
+        } catch {}
+      }
+    });
   }, [resolvedBookId, resolvedUri]);
 
   useEffect(() => {
@@ -180,6 +210,10 @@ export default function EpubReaderScreen() {
 
   const handleReady = useCallback((event: BukReadyEvent) => {
     setPositionCount(event.nativeEvent.positionCount);
+    const saved = highlightsRef.current;
+    if (saved.length > 0) {
+      setHighlightCommand(JSON.stringify({ action: 'setAll', highlights: JSON.stringify(saved) }));
+    }
   }, []);
 
   const handleLocation = useCallback((event: BukLocationEvent) => {
@@ -206,8 +240,67 @@ export default function EpubReaderScreen() {
   }, [resolvedBookId]);
 
   const handleTap = useCallback((_event: BukTapEvent) => {
+    if (selectionInfo || highlightTapInfo) {
+      setSelectionInfo(null);
+      setHighlightTapInfo(null);
+      return;
+    }
     setControlsVisible((v) => !v);
+  }, [selectionInfo, highlightTapInfo]);
+
+  const handleSelection = useCallback((event: BukSelectionEvent) => {
+    const { selectedText, x, y, width, height } = event.nativeEvent;
+    setHighlightTapInfo(null);
+    if (!selectedText) { setSelectionInfo(null); return; }
+    setSelectionInfo({ text: selectedText, x, y, w: width, h: height });
   }, []);
+
+  const handleHighlightTap = useCallback((event: BukHighlightTapEvent) => {
+    const { id, colorHex, x, y, width, height } = event.nativeEvent;
+    setSelectionInfo(null);
+    setHighlightTapInfo({ id, colorHex, x, y, w: width, h: height });
+  }, []);
+
+  const handleHighlightApplied = useCallback((event: BukHighlightAppliedEvent) => {
+    const { id, locatorJson, colorHex } = event.nativeEvent;
+    const entry: HighlightEntry = { id, locatorJson, colorHex, createdAt: Date.now() };
+    setHighlights((prev) => {
+      const next = [entry, ...prev];
+      highlightsRef.current = next;
+      AsyncStorage.setItem(highlightsKey(resolvedBookId), JSON.stringify(next));
+      return next;
+    });
+  }, [resolvedBookId]);
+
+  const handleApplyHighlight = useCallback((colorHex: string) => {
+    if (selectionInfo) {
+      const id = `hl-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      setHighlightCommand(JSON.stringify({ action: 'apply', id, colorHex }));
+      setSelectionInfo(null);
+    } else if (highlightTapInfo) {
+      setHighlightCommand(JSON.stringify({ action: 'change', id: highlightTapInfo.id, colorHex }));
+      setHighlights((prev) => {
+        const next = prev.map((h) => h.id === highlightTapInfo.id ? { ...h, colorHex } : h);
+        highlightsRef.current = next;
+        AsyncStorage.setItem(highlightsKey(resolvedBookId), JSON.stringify(next));
+        return next;
+      });
+      setHighlightTapInfo(null);
+    }
+  }, [selectionInfo, highlightTapInfo, resolvedBookId]);
+
+  const handleRemoveHighlight = useCallback(() => {
+    if (!highlightTapInfo) return;
+    const id = highlightTapInfo.id;
+    setHighlightCommand(JSON.stringify({ action: 'remove', id }));
+    setHighlights((prev) => {
+      const next = prev.filter((h) => h.id !== id);
+      highlightsRef.current = next;
+      AsyncStorage.setItem(highlightsKey(resolvedBookId), JSON.stringify(next));
+      return next;
+    });
+    setHighlightTapInfo(null);
+  }, [highlightTapInfo, resolvedBookId]);
 
   const handleError = useCallback((event: BukErrorEvent) => {
     setError(event.nativeEvent.message);
@@ -349,11 +442,38 @@ export default function EpubReaderScreen() {
           initialLocator={currentLocator ?? savedLocator ?? undefined}
           preferences={readiumPrefs}
           command={command}
+          highlightCommand={highlightCommand}
           onBukReady={handleReady}
           onBukLocation={handleLocation}
           onBukTap={handleTap}
           onBukError={handleError}
+          onBukSelection={handleSelection}
+          onBukHighlightTap={handleHighlightTap}
+          onBukHighlightApplied={handleHighlightApplied}
         />
+      )}
+
+      {/* ── Highlight toolbar overlay ─────────────────────────────────────── */}
+      {(selectionInfo || highlightTapInfo) && (
+        <>
+          <Pressable
+            style={StyleSheet.absoluteFillObject}
+            onPress={() => { setSelectionInfo(null); setHighlightTapInfo(null); }}
+            pointerEvents="box-only"
+          />
+          <HighlightToolbar
+            selectedText={selectionInfo?.text ?? ''}
+            selX={selectionInfo?.x ?? highlightTapInfo?.x ?? 0}
+            selY={selectionInfo?.y ?? highlightTapInfo?.y ?? 0}
+            selWidth={selectionInfo?.w ?? highlightTapInfo?.w ?? 0}
+            selHeight={selectionInfo?.h ?? highlightTapInfo?.h ?? 0}
+            existingId={highlightTapInfo?.id}
+            existingColorHex={highlightTapInfo?.colorHex}
+            bookTitle={resolvedTitle}
+            onApplyColor={handleApplyHighlight}
+            onRemove={handleRemoveHighlight}
+          />
+        </>
       )}
     </ReaderLayout>
   );
