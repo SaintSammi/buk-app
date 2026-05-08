@@ -240,18 +240,16 @@ export default function EpubReaderScreen() {
   }, [resolvedBookId]);
 
   const handleTap = useCallback((_event: BukTapEvent) => {
-    if (selectionInfo || highlightTapInfo) {
-      setSelectionInfo(null);
-      setHighlightTapInfo(null);
-      return;
-    }
+    // Never let a WebView tap event dismiss the toolbar — the backdrop Pressable
+    // handles that. Readium may fire onTap just after a long-press lifts, which
+    // would race against setSelectionInfo and wipe the toolbar before it renders.
     setControlsVisible((v) => !v);
-  }, [selectionInfo, highlightTapInfo]);
+  }, []);
 
   const handleSelection = useCallback((event: BukSelectionEvent) => {
     const { selectedText, x, y, width, height } = event.nativeEvent;
+    if (!selectedText) return; // ignore cleared events — toolbar dismissed by user action only
     setHighlightTapInfo(null);
-    if (!selectedText) { setSelectionInfo(null); return; }
     setSelectionInfo({ text: selectedText, x, y, w: width, h: height });
   }, []);
 
@@ -403,6 +401,7 @@ export default function EpubReaderScreen() {
   }
 
   return (
+    <View style={styles.container}>
     <ReaderLayout
       prefs={prefs}
       updatePrefs={updatePrefs}
@@ -452,30 +451,31 @@ export default function EpubReaderScreen() {
           onBukHighlightApplied={handleHighlightApplied}
         />
       )}
-
-      {/* ── Highlight toolbar overlay ─────────────────────────────────────── */}
-      {(selectionInfo || highlightTapInfo) && (
-        <>
-          <Pressable
-            style={StyleSheet.absoluteFillObject}
-            onPress={() => { setSelectionInfo(null); setHighlightTapInfo(null); }}
-            pointerEvents="box-only"
-          />
-          <HighlightToolbar
-            selectedText={selectionInfo?.text ?? ''}
-            selX={selectionInfo?.x ?? highlightTapInfo?.x ?? 0}
-            selY={selectionInfo?.y ?? highlightTapInfo?.y ?? 0}
-            selWidth={selectionInfo?.w ?? highlightTapInfo?.w ?? 0}
-            selHeight={selectionInfo?.h ?? highlightTapInfo?.h ?? 0}
-            existingId={highlightTapInfo?.id}
-            existingColorHex={highlightTapInfo?.colorHex}
-            bookTitle={resolvedTitle}
-            onApplyColor={handleApplyHighlight}
-            onRemove={handleRemoveHighlight}
-          />
-        </>
-      )}
     </ReaderLayout>
+
+    {/* ── Highlight toolbar — rendered ABOVE ReaderLayout's backdrop/header ── */}
+    {(selectionInfo || highlightTapInfo) && (
+      <>
+        <Pressable
+          style={StyleSheet.absoluteFillObject}
+          onPress={() => { setSelectionInfo(null); setHighlightTapInfo(null); }}
+          pointerEvents="box-only"
+        />
+        <HighlightToolbar
+          selectedText={selectionInfo?.text ?? ''}
+          selX={selectionInfo?.x ?? highlightTapInfo?.x ?? 0}
+          selY={selectionInfo?.y ?? highlightTapInfo?.y ?? 0}
+          selWidth={selectionInfo?.w ?? highlightTapInfo?.w ?? 0}
+          selHeight={selectionInfo?.h ?? highlightTapInfo?.h ?? 0}
+          existingId={highlightTapInfo?.id}
+          existingColorHex={highlightTapInfo?.colorHex}
+          bookTitle={resolvedTitle}
+          onApplyColor={handleApplyHighlight}
+          onRemove={handleRemoveHighlight}
+        />
+      </>
+    )}
+    </View>
   );
 }
 

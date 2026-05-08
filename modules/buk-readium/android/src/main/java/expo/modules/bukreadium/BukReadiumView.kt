@@ -466,6 +466,7 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
         }
 
         override fun onSelectionChanged(selectedText: String, x: Float, y: Float, width: Float, height: Float) {
+            // Coordinates are CSS pixels from getBoundingClientRect() which equal dp — no density division
             dispatchEvent("onBukSelection", mapOf(
                 "selectedText" to selectedText,
                 "x" to x.toDouble(), "y" to y.toDouble(),
@@ -474,10 +475,9 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
         }
 
         override fun onSelectionCleared() {
-            dispatchEvent("onBukSelection", mapOf(
-                "selectedText" to "",
-                "x" to 0.0, "y" to 0.0, "width" to 0.0, "height" to 0.0
-            ))
+            // Don't dispatch — JS selectionchange fires cleared on pointer-up even
+            // after a valid selection, which would wipe the toolbar immediately.
+            // The toolbar is dismissed explicitly by user tap or color apply.
         }
 
         override fun onHighlightTap(id: String, colorHex: String, x: Float, y: Float, width: Float, height: Float) {

@@ -1,14 +1,21 @@
 package expo.modules.bukreadium
 
 import android.graphics.Color
+import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
+import android.view.ActionMode
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.webkit.JavascriptInterface
+import android.view.ViewTreeObserver
+import android.webkit.WebMessage
+import android.webkit.WebMessagePort
 import android.webkit.WebView
 import android.widget.FrameLayout
+import org.json.JSONObject
 import androidx.fragment.app.Fragment
 import androidx.fragment.app.commitNow
 import androidx.lifecycle.Lifecycle
@@ -79,7 +86,13 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
     private var contentInsetTopPx: Int = 0
 
     // ─── Highlight / selection state ──────────────────────────────────────────
-    private var selectionBridgeInstalled = false
+    // We use WebMessagePort instead of addJavascriptInterface because
+    // addJavascriptInterface only takes effect on FUTURE page navigations, not the
+    // already-loaded page. WebMessagePort's postWebMessage works immediately on the
+    // current page.
+    private var interfaceWebView: WebView? = null
+    private var webMessagePort: WebMessagePort? = null  // Android-side port (receives from JS)
+    private var pendingWebPort: WebMessagePort? = null  // Web-side port (held until script runs)
     private var pendingSelectionLocator: Locator? = null
     private val highlightDecorations = mutableMapOf<String, Decoration>()
 
@@ -100,29 +113,20 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
 
     // ─── Selection JS bridge ─────────────────────────────────────────────────
 
-    private inner class BukSelectionBridge {
-        @JavascriptInterface
-        fun selected(text: String, x: Float, y: Float, width: Float, height: Float) {
-            lifecycleScope.launch(Dispatchers.Main) {
-                pendingSelectionLocator = (navigator as? SelectableNavigator)?.currentSelection()?.locator
-                viewListener?.onSelectionChanged(text, x, y, width, height)
-            }
-        }
-        @JavascriptInterface
-        fun cleared() {
-            lifecycleScope.launch(Dispatchers.Main) {
-                pendingSelectionLocator = null
-                viewListener?.onSelectionCleared()
-            }
-        }
+    private fun installBridgeOnWebView(webView: WebView) {
+        if (webView === interfaceWebView) return
+        Log.e(TAG, "installBridgeOnWebView: new WebView instance ${webView.hashCode()}")
+        interfaceWebView = webView
+        // injectSelectionJs() will be called by the caller (onGlobalLayout / collect block)
     }
 
     private fun setupHighlightBridgeIfNeeded() {
-        if (selectionBridgeInstalled) return
-        val webView = findWebView(navigator?.view) ?: return
-        selectionBridgeInstalled = true
+        val webView = findWebView(navigator?.view)
+        Log.e(TAG, "setupHighlightBridgeIfNeeded: webView=${webView?.hashCode()} interfaceWv=${interfaceWebView?.hashCode()}")
+        if (webView == null) return
 
-        webView.addJavascriptInterface(BukSelectionBridge(), "BukSel")
+        // Reinstall if this is a new WebView instance
+        installBridgeOnWebView(webView)
 
         // Listen for taps on existing highlight decorations
         (navigator as? DecorableNavigator)?.addDecorationListener(
@@ -146,84 +150,200 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
     }
 
     private fun injectSelectionJs() {
-        val webView = findWebView(navigator?.view) ?: return
+        val webView = interfaceWebView ?: return
+        Log.e(TAG, "injectSelectionJs: webView=${webView.hashCode()}")
+
+        // Close any previous port from a prior injection (page turn)
+        webMessagePort?.close()
+        webMessagePort = null
+
+        // Create a fresh message channel. The android port receives messages from JS.
+        // The web port is transferred to JS via postWebMessage — this works on the
+        // CURRENTLY LOADED page, unlike addJavascriptInterface.
+        val channel = webView.createWebMessageChannel()
+        val androidPort = channel[0]
+        val webPort    = channel[1]
+        webMessagePort = androidPort
+        pendingWebPort = webPort
+
+        androidPort.setWebMessageCallback(object : WebMessagePort.WebMessageCallback() {
+            override fun onMessage(port: WebMessagePort, message: WebMessage) {
+                val data = message.data ?: return
+                Log.e(TAG, "port.msg: $data")
+                try {
+                    val json = JSONObject(data)
+                    when (json.getString("type")) {
+                        "sel" -> {
+                            val text = json.getString("tx")
+                            val x    = json.getDouble("x").toFloat()
+                            val y    = json.getDouble("y").toFloat()
+                            val w    = json.getDouble("w").toFloat()
+                            val h    = json.getDouble("h").toFloat()
+                            lifecycleScope.launch(Dispatchers.Main) {
+                                pendingSelectionLocator = (navigator as? SelectableNavigator)
+                                    ?.currentSelection()?.locator
+                                Log.e(TAG, "port.sel: pending=$pendingSelectionLocator")
+                                viewListener?.onSelectionChanged(text, x, y, w, h)
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "port msg parse err: $e")
+                }
+            }
+        }, Handler(Looper.getMainLooper()))
+
         // language=JavaScript
-        // Readium renders EPUB chapters in iframes; selectionchange fires on the iframe's
-        // document, not the top-level one. BukSel JavascriptInterface is only on the main
-        // window, but closures defined in the main-frame IIFE keep that reference.
         val script = """
             (function(){
-              var BukSel = window.BukSel;
-              if(!BukSel) return;
+              // ── Clean up any previous handlers (idempotent on page-turns) ──────────
+              if (window.__bukSc)  document.removeEventListener('selectionchange', window.__bukSc);
+              if (window.__bukMsg) window.removeEventListener('message', window.__bukMsg);
+              clearTimeout(window.__bukScT);
+              window.__bukPort = null;
 
-              function watchDoc(doc, offX, offY) {
-                if(!doc || doc.__bukSelWatch) return;
-                doc.__bukSelWatch = true;
-                var targetWin = doc.defaultView;
-                var t = null;
-                doc.addEventListener('selectionchange', function() {
-                  clearTimeout(t);
-                  t = setTimeout(function() {
-                    try {
-                      var s = targetWin.getSelection();
-                      if(!s || s.rangeCount===0 || !s.toString().trim()) {
-                        BukSel.cleared(); return;
-                      }
-                      var r = s.getRangeAt(0).getBoundingClientRect();
-                      BukSel.selected(s.toString().trim(),
-                        r.left+offX, r.top+offY, r.width, r.height);
-                    } catch(e) {}
-                  }, 200);
-                });
-                doc.addEventListener('contextmenu', function(e){
-                  e.preventDefault(); e.stopPropagation();
-                }, true);
+              // ── Report selection via debounced selectionchange ─────────────────────
+              // We don't rely on touch events — Android WebView fires touchcancel (not
+              // touchend) after a long-press, so touch events are unreliable here.
+              // Instead we snapshot the selection synchronously and report after 80ms of
+              // no further changes (handles the user dragging the selection handles).
+              window.__bukSc = function() {
+                clearTimeout(window.__bukScT);
+                var s = window.getSelection();
+                var txt = (s && s.rangeCount > 0) ? s.toString().trim() : '';
+                if (!txt) return;
+                // Snapshot the rect immediately while selection is still live
+                var r = s.getRangeAt(0).getBoundingClientRect();
+                var snap = {t: txt, x: r.left, y: r.top, w: r.width, h: r.height};
+                window.__bukScT = setTimeout(function() {
+                  if (!window.__bukPort) return;
+                  try {
+                    window.__bukPort.postMessage(JSON.stringify({type:'sel',tx:snap.t,x:snap.x,y:snap.y,w:snap.w,h:snap.h}));
+                  } catch(e) {}
+                }, 80);
+              };
+              document.addEventListener('selectionchange', window.__bukSc);
+
+              // ── Receive the WebMessagePort from Android AND iframe relay ──────────
+              window.__bukMsg = function(e) {
+                if (e.data === 'buk-init' && e.ports && e.ports.length > 0) {
+                  window.__bukPort = e.ports[0];
+                  return;
+                }
+                if (e.data && e.data.t === 'bs' && e.data.m === 's' && window.__bukPort) {
+                  try {
+                    window.__bukPort.postMessage(JSON.stringify({type:'sel',tx:e.data.tx,x:e.data.x,y:e.data.y,w:e.data.w,h:e.data.h}));
+                  } catch(ex) {}
+                }
+              };
+              window.addEventListener('message', window.__bukMsg);
+
+              // ── Per-iframe injection (same debounced selectionchange) ─────────────
+              function injectFrame(fr) {
+                try {
+                  var doc = fr.contentDocument;
+                  if (!doc || !doc.documentElement) return;
+                  if (doc.__bukInjected) return;
+                  doc.__bukInjected = true;
+                  var rect = fr.getBoundingClientRect();
+                  var ox = rect.left, oy = rect.top;
+                  var code =
+                    '(function(ox,oy){' +
+                    'if(window.__bukSel)return;window.__bukSel=true;' +
+                    'var t2=null;' +
+                    'document.addEventListener("selectionchange",function(){' +
+                      'clearTimeout(t2);' +
+                      'var s=window.getSelection();' +
+                      'var txt=(s&&s.rangeCount>0)?s.toString().trim():"";' +
+                      'if(!txt)return;' +
+                      'var r=s.getRangeAt(0).getBoundingClientRect();' +
+                      'var snap={t:txt,x:r.left+ox,y:r.top+oy,w:r.width,h:r.height};' +
+                      't2=setTimeout(function(){' +
+                        'try{window.parent.postMessage({t:"bs",m:"s",tx:snap.t,x:snap.x,y:snap.y,w:snap.w,h:snap.h},"*");}catch(e){}' +
+                      '},80);' +
+                    '});' +
+                    '})(' + ox + ',' + oy + ')';
+                  var s = doc.createElement('script');
+                  s.textContent = code;
+                  doc.documentElement.appendChild(s);
+                } catch(e) {}
               }
 
               function installAll() {
-                watchDoc(document, 0, 0);
                 var frames = document.querySelectorAll('iframe');
-                for(var i=0; i<frames.length; i++) {
-                  try {
-                    var fr = frames[i];
-                    var rect = fr.getBoundingClientRect();
-                    watchDoc(fr.contentDocument, rect.left, rect.top);
-                  } catch(e) {}
+                for (var i = 0; i < frames.length; i++) {
+                  var fr = frames[i];
+                  if (!fr.__bukLoadWatch) {
+                    fr.__bukLoadWatch = true;
+                    fr.addEventListener('load', function() { injectFrame(this); });
+                  }
+                  injectFrame(fr);
                 }
               }
 
-              installAll();
-
-              if(!window.__bukSelObserver) {
-                window.__bukSelObserver = true;
-                new MutationObserver(installAll)
-                  .observe(document.documentElement, {childList:true, subtree:true});
+              if (!window.__bukMutObs) {
+                window.__bukMutObs = new MutationObserver(installAll);
+                window.__bukMutObs.observe(document.documentElement, {childList:true, subtree:true});
               }
+
+              installAll();
+              setTimeout(installAll, 500);
+              setTimeout(installAll, 1500);
             })();
         """.trimIndent()
-        webView.post { webView.evaluateJavascript(script, null) }
+
+        webView.post {
+            webView.evaluateJavascript(script) { _ ->
+                // Script is now running — the 'message' listener is live.
+                // Now safe to send the web-side port. JS will receive it as a
+                // 'message' event with data='buk-init' and e.ports[0] = the port.
+                val wp = pendingWebPort ?: return@evaluateJavascript
+                pendingWebPort = null
+                Log.e(TAG, "sending buk-init port to JS")
+                webView.postWebMessage(
+                    WebMessage("buk-init", arrayOf(wp)),
+                    Uri.parse("*")
+                )
+
+                // Diagnostic: verify port and page structure
+                webView.postDelayed({
+                    webView.evaluateJavascript(
+                        "(function(){return JSON.stringify({port:typeof window.__bukPort," +
+                        "iframes:document.querySelectorAll('iframe').length," +
+                        "url:location.href.slice(0,80)})})()"
+                    ) { result -> Log.e(TAG, "BUK_DIAG: $result") }
+                }, 1000)
+            }
+        }
     }
 
     // ─── Public highlight API ─────────────────────────────────────────────────
 
     fun applyHighlight(id: String, colorHex: String) {
-        val locator = pendingSelectionLocator ?: return
-        pendingSelectionLocator = null
+        Log.e(TAG, "applyHighlight: id=$id color=$colorHex pending=$pendingSelectionLocator nav=${navigator != null}")
         val color = try { Color.parseColor(colorHex) } catch (_: Exception) { return }
-        val decoration = Decoration(
-            id = id,
-            locator = locator,
-            style = Decoration.Style.Highlight(tint = color),
-            extras = mapOf("colorHex" to colorHex)
-        )
-        highlightDecorations[id] = decoration
-        lifecycleScope.launch {
+        // Run in a coroutine on Main so we can call currentSelection() as a fallback
+        // if pendingSelectionLocator was already cleared by the selectionchange race.
+        lifecycleScope.launch(Dispatchers.Main) {
+            val locator = pendingSelectionLocator
+                ?: (navigator as? SelectableNavigator)?.currentSelection()?.locator
+            Log.e(TAG, "applyHighlight coroutine: locator=$locator")
+            if (locator == null) return@launch
+            pendingSelectionLocator = null
+            val decoration = Decoration(
+                id = id,
+                locator = locator,
+                style = Decoration.Style.Highlight(tint = color),
+                extras = mapOf("colorHex" to colorHex)
+            )
+            highlightDecorations[id] = decoration
+            Log.e(TAG, "applyHighlight: calling applyDecorations count=${highlightDecorations.size}")
             (navigator as? DecorableNavigator)?.applyDecorations(
                 highlightDecorations.values.toList(), "highlights"
             )
+            Log.e(TAG, "applyHighlight: done")
+            viewListener?.onHighlightApplied(id, locator.toJSON().toString(), colorHex)
         }
-        (navigator as? SelectableNavigator)?.clearSelection()
-        viewListener?.onHighlightApplied(id, locator.toJSON().toString(), colorHex)
     }
 
     fun changeHighlight(id: String, colorHex: String) {
@@ -325,7 +445,34 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
         savedInstanceState: Bundle?
     ): View {
         Log.i(TAG, "onCreateView: savedInstanceState=${savedInstanceState != null}")
-        val frame = FrameLayout(requireContext()).apply {
+        val frame = object : FrameLayout(requireContext()) {
+            // Suppress the native text-selection action bar while keeping the selection
+            // alive. Returning null would tell Android the action mode was cancelled,
+            // which causes the WebView to immediately clear the text selection.
+            // Instead we return a no-op ActionMode so Android believes an action mode
+            // is active — the selection handles stay visible and the locator remains
+            // available to Readium's currentSelection().
+            private fun noopActionMode(): ActionMode = object : ActionMode() {
+                override fun setTitle(title: CharSequence?) {}
+                override fun setTitle(resId: Int) {}
+                override fun setSubtitle(subtitle: CharSequence?) {}
+                override fun setSubtitle(resId: Int) {}
+                override fun setCustomView(view: View?) {}
+                override fun invalidate() {}
+                override fun finish() {}
+                override fun getMenu() = null!!
+                override fun getTitle(): CharSequence? = null
+                override fun getSubtitle(): CharSequence? = null
+                override fun getCustomView(): View? = null
+                override fun getMenuInflater() = null!!
+            }
+            override fun startActionModeForChild(
+                originalView: View, callback: ActionMode.Callback, type: Int
+            ): ActionMode = noopActionMode()
+            override fun startActionModeForChild(
+                originalView: View, callback: ActionMode.Callback
+            ): ActionMode = noopActionMode()
+        }.apply {
             id = View.generateViewId()
             layoutParams = ViewGroup.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT,
@@ -354,6 +501,32 @@ class BukReadiumHostFragment : Fragment(), EpubNavigatorFragment.Listener {
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
         Log.i(TAG, "onViewCreated: navigator=${navigator != null}")
+
+        // Install the JavascriptInterface as soon as the WebView first appears in the
+        // view tree — this is BEFORE the EPUB page finishes loading, so the interface
+        // will be visible to JavaScript when the page's JS context is created.
+        // Watch for WebView appearing or being replaced.
+        // Readium creates an INVISIBLE placeholder WebView first, then swaps in the real
+        // VISIBLE one. We must not remove this listener after the first fire — we need
+        // to detect the replacement and reinstall BukSel on the new instance.
+        val layoutListener = object : ViewTreeObserver.OnGlobalLayoutListener {
+            private var stableCount = 0
+            override fun onGlobalLayout() {
+                val wv = findWebView(view) ?: return
+                if (wv === interfaceWebView) {
+                    // Same instance — increment stability counter and stop watching once stable
+                    if (++stableCount >= 10) {
+                        view.viewTreeObserver.removeOnGlobalLayoutListener(this)
+                    }
+                    return
+                }
+                stableCount = 0
+                Log.e(TAG, "onGlobalLayout: WebView instance changed to ${wv.hashCode()}")
+                installBridgeOnWebView(wv)
+                injectSelectionJs()
+            }
+        }
+        view.viewTreeObserver.addOnGlobalLayoutListener(layoutListener)
 
         val nav = navigator ?: run {
             Log.e(TAG, "onViewCreated: navigator is null — cannot proceed")

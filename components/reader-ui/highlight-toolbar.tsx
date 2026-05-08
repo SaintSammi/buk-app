@@ -1,11 +1,8 @@
-import { Image } from 'expo-image';
 import React from 'react';
-import { Clipboard, Dimensions, Pressable, Share, StyleSheet, View } from 'react-native';
+import { Dimensions, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 
 export const HIGHLIGHT_COLORS = ['#FFA2A2', '#FFE1A2', '#F3A2FF', '#A2FFDA'] as const;
-
-const copyIcon   = require('@/assets/copy-01.svg');
-const shareIcon  = require('@/assets/share-08.svg');
 
 // Gap between every item, outer horizontal padding (matches design spec)
 const GAP = 16;
@@ -52,7 +49,10 @@ export function HighlightToolbar({
   const top  = selY + selHeight + 12;
   const left = Math.max(8, Math.min(selX + selWidth / 2 - TOOLBAR_WIDTH / 2, sw - TOOLBAR_WIDTH - 8));
 
-  const handleCopy = () => Clipboard.setString(selectedText);
+  const handleCopy = () => {
+    Clipboard.setStringAsync(selectedText);
+    // Optionally remove if desired, but we'll stick to original logic
+  };
 
   const handleShare = async () => {
     const message = bookTitle ? `"${selectedText}" — ${bookTitle}` : `"${selectedText}"`;
@@ -65,15 +65,19 @@ export function HighlightToolbar({
   };
 
   return (
-    <View style={[styles.toolbar, { top, left }]}>
+    <View 
+      style={[styles.toolbar, { top, left }]}
+      onStartShouldSetResponder={() => true}
+      onTouchEnd={(e) => e.stopPropagation()}
+    >
       {/* Copy */}
       <Pressable onPress={handleCopy} style={styles.action} hitSlop={6}>
-        <Image source={copyIcon} style={styles.icon} contentFit="contain" />
+        <Text style={styles.iconText}>⎘</Text>
       </Pressable>
 
       {/* Share */}
       <Pressable onPress={handleShare} style={styles.action} hitSlop={6}>
-        <Image source={shareIcon} style={styles.icon} contentFit="contain" />
+        <Text style={styles.iconText}>↑</Text>
       </Pressable>
 
       {/* Divider */}
@@ -104,17 +108,18 @@ const styles = StyleSheet.create({
     zIndex: 60,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 999,
+    backgroundColor: '#FFF',
+    borderRadius: 33,
     paddingHorizontal: PAD_H,
     height: TOOLBAR_HEIGHT,
     width: TOOLBAR_WIDTH,
     gap: GAP,
-    elevation: 14,
+    // Design-spec shadow (most prominent layer: 0 3px 7px rgba(0,0,0,0.10))
+    elevation: 6,
     shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.10,
+    shadowRadius: 7,
+    shadowOffset: { width: 0, height: 3 },
   },
   action: {
     width: ICON_SIZE,
@@ -122,9 +127,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  icon: {
-    width: ICON_SIZE,
-    height: ICON_SIZE,
+  iconText: {
+    fontSize: 16,
+    color: '#333',
   },
   sep: {
     width: SEP_W,
