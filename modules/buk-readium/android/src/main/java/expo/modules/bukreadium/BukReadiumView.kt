@@ -466,6 +466,7 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
         }
 
         override fun onSelectionChanged(selectedText: String, x: Float, y: Float, width: Float, height: Float) {
+            Log.e(TAG, "onSelectionChanged: tx='$selectedText' x=$x y=$y w=$width h=$height")
             // Coordinates are CSS pixels from getBoundingClientRect() which equal dp — no density division
             dispatchEvent("onBukSelection", mapOf(
                 "selectedText" to selectedText,
@@ -511,7 +512,7 @@ class BukReadiumView(context: Context, appContext: AppContext) : ExpoView(contex
                     "onBukLocation"        -> onBukLocation(payload)
                     "onBukTap"             -> onBukTap(payload)
                     "onBukError"           -> onBukError(payload)
-                    "onBukSelection"       -> onBukSelection(payload)
+                    "onBukSelection"       -> { Log.e(TAG, "dispatch onBukSelection"); onBukSelection(payload) }
                     "onBukHighlightTap"    -> onBukHighlightTap(payload)
                     "onBukHighlightApplied"-> onBukHighlightApplied(payload)
                 }

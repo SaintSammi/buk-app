@@ -9,6 +9,7 @@ import {
   BukReadiumView,
   buildCommand,
   extractEpubToc,
+  extractEpubCover,
   type EpubTocItem,
   type BukReadyEvent,
   type BukLocationEvent,
@@ -20,6 +21,7 @@ import {
   type HighlightEntry,
 } from '@/modules/buk-readium';
 import { HighlightToolbar } from '@/components/reader-ui/highlight-toolbar';
+import { ShareQuoteSheet } from '@/components/reader-ui/share-quote-sheet';
 import { ReaderLayout } from '@/components/reader-ui/reader-layout';
 import { useReaderPrefs, prefsToReadium } from '@/hooks/use-reader-prefs';
 import { READER_THEMES } from '@/constants/reader-theme';
@@ -86,6 +88,8 @@ export default function EpubReaderScreen() {
   const [highlightTapInfo, setHighlightTapInfo] = useState<{
     id: string; colorHex: string; x: number; y: number; w: number; h: number;
   } | null>(null);
+  const [coverUri, setCoverUri] = useState<string | null>(null);
+  const [shareInfo, setShareInfo] = useState<{ text: string } | null>(null);
   
   useKeepAwake();
 
@@ -128,6 +132,9 @@ export default function EpubReaderScreen() {
       extractEpubToc(resolvedUri).then((res) => {
         if (res) setToc(res);
       });
+      extractEpubCover(resolvedUri).then((uri) => {
+        if (uri) setCoverUri(uri);
+      }).catch(() => {});
     }
 
     // Load persisted highlights
@@ -219,6 +226,11 @@ export default function EpubReaderScreen() {
   const handleLocation = useCallback((event: BukLocationEvent) => {
     const { locator, position, positionCount: total, progression: prog } = event.nativeEvent;
 
+    // Dismiss the toolbar when the page changes — the selection / highlight no
+    // longer corresponds to anything visible on the new page.
+    setSelectionInfo(null);
+    setHighlightTapInfo(null);
+
     if (position > 0) setCurrentPosition(position);
     setProgression(prog);
     setCurrentLocator(locator);
@@ -240,17 +252,25 @@ export default function EpubReaderScreen() {
   }, [resolvedBookId]);
 
   const handleTap = useCallback((_event: BukTapEvent) => {
-    // Never let a WebView tap event dismiss the toolbar — the backdrop Pressable
-    // handles that. Readium may fire onTap just after a long-press lifts, which
-    // would race against setSelectionInfo and wipe the toolbar before it renders.
+    // Never let a WebView tap event toggle controls while the toolbar is active.
+    // Readium fires onTap after a long-press lifts; if selectionInfo/highlightTapInfo
+    // is already set (or is about to be set), toggling controls would animate the
+    // header over the toolbar before the user can tap a swatch.
+    if (selectionInfo || highlightTapInfo) return;
     setControlsVisible((v) => !v);
-  }, []);
+  }, [selectionInfo, highlightTapInfo]);
 
   const handleSelection = useCallback((event: BukSelectionEvent) => {
     const { selectedText, x, y, width, height } = event.nativeEvent;
     if (!selectedText) return; // ignore cleared events — toolbar dismissed by user action only
     setHighlightTapInfo(null);
     setSelectionInfo({ text: selectedText, x, y, w: width, h: height });
+  }, []);
+
+  const handleOpenShare = useCallback((text: string) => {
+    setSelectionInfo(null);
+    setHighlightTapInfo(null);
+    setShareInfo({ text });
   }, []);
 
   const handleHighlightTap = useCallback((event: BukHighlightTapEvent) => {
@@ -472,9 +492,20 @@ export default function EpubReaderScreen() {
           bookTitle={resolvedTitle}
           onApplyColor={handleApplyHighlight}
           onRemove={handleRemoveHighlight}
+          onShare={() => handleOpenShare(selectionInfo?.text ?? '')}
         />
       </>
     )}
+
+    {/* ── Share Quote Sheet ──────────────────────────────────────────────── */}
+    <ShareQuoteSheet
+      visible={shareInfo !== null}
+      selectedText={shareInfo?.text ?? ''}
+      bookTitle={resolvedTitle}
+      bookAuthor={resolvedAuthor}
+      coverUri={coverUri}
+      onClose={() => setShareInfo(null)}
+    />
     </View>
   );
 }

@@ -1,6 +1,10 @@
 import React from 'react';
-import { Dimensions, Pressable, Share, StyleSheet, Text, View } from 'react-native';
+import { Dimensions, Pressable, StyleSheet, View } from 'react-native';
+import { Image } from 'expo-image';
 import * as Clipboard from 'expo-clipboard';
+
+const COPY_ICON = require('../../assets/copy.svg');
+const SHARE_ICON = require('../../assets/share.svg');
 
 export const HIGHLIGHT_COLORS = ['#FFA2A2', '#FFE1A2', '#F3A2FF', '#A2FFDA'] as const;
 
@@ -29,6 +33,7 @@ interface HighlightToolbarProps {
   bookTitle?: string;
   onApplyColor: (colorHex: string) => void;
   onRemove?: () => void;
+  onShare?: () => void;
 }
 
 export function HighlightToolbar({
@@ -42,6 +47,7 @@ export function HighlightToolbar({
   bookTitle,
   onApplyColor,
   onRemove,
+  onShare,
 }: HighlightToolbarProps) {
   const { width: sw } = Dimensions.get('window');
 
@@ -54,10 +60,6 @@ export function HighlightToolbar({
     // Optionally remove if desired, but we'll stick to original logic
   };
 
-  const handleShare = async () => {
-    const message = bookTitle ? `"${selectedText}" — ${bookTitle}` : `"${selectedText}"`;
-    await Share.share({ message });
-  };
 
   const handleSwatchPress = (color: string) => {
     if (existingId && existingColorHex === color) onRemove?.();
@@ -72,12 +74,12 @@ export function HighlightToolbar({
     >
       {/* Copy */}
       <Pressable onPress={handleCopy} style={styles.action} hitSlop={6}>
-        <Text style={styles.iconText}>⎘</Text>
+        <Image source={COPY_ICON} style={styles.icon} contentFit="contain" />
       </Pressable>
 
       {/* Share */}
-      <Pressable onPress={handleShare} style={styles.action} hitSlop={6}>
-        <Text style={styles.iconText}>↑</Text>
+      <Pressable onPress={onShare} style={styles.action} hitSlop={6}>
+        <Image source={SHARE_ICON} style={styles.icon} contentFit="contain" />
       </Pressable>
 
       {/* Divider */}
@@ -127,9 +129,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  iconText: {
-    fontSize: 16,
-    color: '#333',
+  icon: {
+    width: ICON_SIZE,
+    height: ICON_SIZE,
   },
   sep: {
     width: SEP_W,
