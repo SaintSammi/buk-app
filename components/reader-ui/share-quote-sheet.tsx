@@ -140,6 +140,7 @@ export function ShareQuoteSheet({
   const [colorIdx, setColorIdx]     = useState(0);
   const [fontIdx, setFontIdx]       = useState(0);
   const [capturing, setCapturing]   = useState(false);
+  const [saved, setSaved]           = useState(false);
   const [quoteFontSize, setQuoteFontSize] = useState(MAX_FONT_SIZE);
   const fontSizeRef = useRef(MAX_FONT_SIZE);
 
@@ -171,6 +172,11 @@ export function ShareQuoteSheet({
     : rawText;
 
   const cardRef = useRef<ViewShot>(null);
+
+  // Reset saved state when sheet is closed
+  useEffect(() => {
+    if (!visible) setSaved(false);
+  }, [visible]);
 
   // ── Sheet slide-up / drag-to-dismiss animation ──────────────────────────
   const translateY = useSharedValue(600);
@@ -269,6 +275,7 @@ export function ShareQuoteSheet({
       const uri = await captureCard();
       if (!uri) return;
       await MediaLibrary.saveToLibraryAsync(uri);
+      setSaved(true);
       showPill('Saved to gallery');
     } finally {
       setCapturing(false);
@@ -425,6 +432,7 @@ export function ShareQuoteSheet({
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.shareRow}
+            style={styles.shareRowScroll}
           >
             {SHARE_DESTINATIONS.map((dest) => (
               <Pressable
@@ -433,8 +441,14 @@ export function ShareQuoteSheet({
                 onPress={() => handleShare(dest)}
                 disabled={capturing}
               >
-                <Image source={dest.icon} style={styles.shareIcon} contentFit="cover" />
-                <Text style={styles.shareLabel}>{dest.label}</Text>
+                <Image
+                  source={dest.icon}
+                  style={[styles.shareIcon, dest.id === 'save' && saved && styles.shareIconSaved]}
+                  contentFit="cover"
+                />
+                <Text style={[styles.shareLabel, dest.id === 'save' && saved && styles.shareLabelSaved]}>
+                  {dest.id === 'save' && saved ? 'Saved' : dest.label}
+                </Text>
               </Pressable>
             ))}
           </ScrollView>
@@ -624,9 +638,13 @@ const styles = StyleSheet.create({
   // Share row
   shareRowWrap: {
     position: 'relative',
+    marginRight: -SHEET_PAD_H,
+  },
+  shareRowScroll: {
+    flexGrow: 0,
   },
   shareRow: {
-    paddingHorizontal: 0,
+    paddingLeft: 0,
     gap: 16,
     alignItems: 'center',
   },
@@ -640,10 +658,17 @@ const styles = StyleSheet.create({
     height: 64,
     borderRadius: 32,
   },
+  shareIconSaved: {
+    opacity: 0.35,
+  },
   shareLabel: {
     fontSize: 12,
+    fontWeight: '600',
     color: '#333333',
     textAlign: 'center',
+  },
+  shareLabelSaved: {
+    color: '#555555',
   },
 
   // Pill feedback
