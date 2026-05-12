@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Alert,
   Dimensions,
   Linking,
   Modal,
@@ -16,9 +15,9 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
-  withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Image } from 'expo-image';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ViewShot from 'react-native-view-shot';
@@ -39,8 +38,8 @@ const COLORS: { label: string; hex: string; key: 'Orange' | 'Green' | 'DarkBlue'
 type PatternKey = 'Orange' | 'Green' | 'DarkBlue' | 'Black' | 'Seablue';
 type PatternIndex = 0 | 1 | 2;
 
-// Static requires — Metro needs these to be literal strings
-const PATTERN_SVGS: Record<PatternIndex, Record<PatternKey, ReturnType<typeof require>>> = {
+const DRAG_BAR_ICON = require('@/assets/share/Drag bar.svg');
+const PATTERN_SVGS: Record<PatternIndex, Record<PatternKey, number>> = {
   0: {
     Orange:   require('@/assets/share/Pattern 1, Orange.svg'),
     Green:    require('@/assets/share/Pattern 1, Green.svg'),
@@ -75,17 +74,17 @@ const SELECTOR_SVGS = [
 interface ShareDest {
   id: string;
   label: string;
-  icon: ReturnType<typeof require>;
+  icon: number;
   action: 'save' | 'share';
   packageName?: string; // Android intent package
 }
 
 const SHARE_DESTINATIONS: ShareDest[] = [
   { id: 'save',      label: 'Save',      icon: require('@/assets/share/Save.svg'),      action: 'save' },
-  { id: 'stories',   label: 'Stories',   icon: require('@/assets/share/Stories.svg'),   action: 'share', packageName: 'com.instagram.android' },
+  { id: 'stories',   label: 'Stories',   icon: require('@/assets/share/Stories.png'),   action: 'share', packageName: 'com.instagram.android' },
   { id: 'whatsapp',  label: 'WhatsApp',  icon: require('@/assets/share/WhatsApp.svg'),  action: 'share', packageName: 'com.whatsapp' },
   { id: 'snapchat',  label: 'Snapchat',  icon: require('@/assets/share/Snapchat.svg'),  action: 'share', packageName: 'com.snapchat.android' },
-  { id: 'message',   label: 'Message',   icon: require('@/assets/share/Message.svg'),   action: 'share', packageName: 'com.instagram.android' },
+  { id: 'message',   label: 'Message',   icon: require('@/assets/share/Stories.png'),   action: 'share', packageName: 'com.instagram.android' },
   { id: 'x',         label: 'X',         icon: require('@/assets/share/X.svg'),         action: 'share', packageName: 'com.twitter.android' },
   { id: 'facebook',  label: 'Facebook',  icon: require('@/assets/share/Facebook.svg'),  action: 'share', packageName: 'com.facebook.katana' },
 ];
@@ -95,13 +94,19 @@ const SHARE_DESTINATIONS: ShareDest[] = [
 const { width: SW } = Dimensions.get('window');
 // Sheet horizontal padding: 24dp each side
 const SHEET_PAD_H = 24;
-// Card fills sheet width minus 2×24 padding
-const CARD_WIDTH = SW - SHEET_PAD_H * 2;
-// Card aspect: design is ~182×322 (from SVG viewBox) → ratio ~1.77
-const CARD_HEIGHT = Math.round(CARD_WIDTH * (322 / 182));
-// Selector thumbnails: 33×60dp (from SVG viewBox), clipped to show ~20dp
+// Selector thumbnails: 33×60dp
 const SELECTOR_W = 33;
 const SELECTOR_H = 60;
+// Card: fixed 182×322dp as per design spec
+const CARD_WIDTH = 182;
+const CARD_HEIGHT = 322;
+// Text area inside card: top 48dp, bottom 70dp, left/right 16dp each
+const QUOTE_AREA_HEIGHT = CARD_HEIGHT - 48 - 70; // 204dp
+// Font scaling
+const MAX_FONT_SIZE = 16;
+const MIN_FONT_SIZE = 8;
+// Max characters: at MIN_FONT_SIZE with widest font, ~20 chars/line × ~18 lines
+export const MAX_SHARE_TEXT_LENGTH = 300;
 // Color circles: 40dp diameter, 16dp gap
 const COLOR_CIRCLE = 40;
 const COLOR_GAP = 16;
@@ -129,22 +134,52 @@ export function ShareQuoteSheet({
 }: ShareQuoteSheetProps) {
   const insets = useSafeAreaInsets();
   const fontsLoaded = useShareQuoteFonts();
+  const isFontReady = (family: string) => fontsLoaded.has(family);
 
   const [patternIdx, setPatternIdx] = useState<PatternIndex>(0);
   const [colorIdx, setColorIdx]     = useState(0);
   const [fontIdx, setFontIdx]       = useState(0);
   const [capturing, setCapturing]   = useState(false);
+  const [quoteFontSize, setQuoteFontSize] = useState(MAX_FONT_SIZE);
+  const fontSizeRef = useRef(MAX_FONT_SIZE);
+
+  // ── Pill feedback ─────────────────────────────────────────────────────────
+  const [pillText, setPillText]     = useState('');
+  const [pillVisible, setPillVisible] = useState(false);
+  const pillOpacity = useSharedValue(0);
+  const pillTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showPill = useCallback((message: string) => {
+    if (pillTimer.current) clearTimeout(pillTimer.current);
+    setPillText(message);
+    setPillVisible(true);
+    pillOpacity.value = withTiming(1, { duration: 180 });
+    pillTimer.current = setTimeout(() => {
+      pillOpacity.value = withTiming(0, { duration: 280 }, () => {
+        runOnJS(setPillVisible)(false);
+      });
+    }, 2200);
+  }, []);
+
+  const pillStyle = useAnimatedStyle(() => ({ opacity: pillOpacity.value }));
+
+  // ── Text trimming ————————————————————————————————————————————————
+  const rawText = selectedText || bookTitle;
+  const isTrimmed = rawText.length > MAX_SHARE_TEXT_LENGTH;
+  const displayText = isTrimmed
+    ? rawText.slice(0, MAX_SHARE_TEXT_LENGTH - 1) + '…'
+    : rawText;
 
   const cardRef = useRef<ViewShot>(null);
 
-  // ── Sheet slide-up animation ──────────────────────────────────────────────
+  // ── Sheet slide-up / drag-to-dismiss animation ──────────────────────────
   const translateY = useSharedValue(600);
   const backdropOpacity = useSharedValue(0);
 
   useEffect(() => {
     if (visible) {
-      backdropOpacity.value = withTiming(1, { duration: 250 });
-      translateY.value = withSpring(0, { damping: 28, stiffness: 300 });
+      backdropOpacity.value = withTiming(1, { duration: 250, easing: Easing.out(Easing.quad) });
+      translateY.value = withTiming(0, { duration: 320, easing: Easing.out(Easing.cubic) });
     } else {
       backdropOpacity.value = withTiming(0, { duration: 200 });
       translateY.value = withTiming(600, { duration: 220, easing: Easing.bezier(0.32, 0, 0.67, 0) });
@@ -158,6 +193,24 @@ export function ShareQuoteSheet({
     opacity: backdropOpacity.value,
   }));
 
+  // Pan gesture — drag down to dismiss, clamp upward drags
+  const panGesture = Gesture.Pan()
+    .onUpdate((e) => {
+      translateY.value = Math.max(0, e.translationY);
+    })
+    .onEnd((e) => {
+      if (e.translationY > 100 || e.velocityY > 500) {
+        // Dismiss: slide out then call onClose
+        translateY.value = withTiming(700, { duration: 220, easing: Easing.bezier(0.32, 0, 0.67, 0) }, () => {
+          runOnJS(onClose)();
+        });
+        backdropOpacity.value = withTiming(0, { duration: 200 });
+      } else {
+        // Snap back
+        translateY.value = withTiming(0, { duration: 250, easing: Easing.out(Easing.cubic) });
+      }
+    });
+
   // ── Colour / pattern helpers ──────────────────────────────────────────────
   const currentColor = COLORS[colorIdx];
   const currentFont  = SHARE_FONTS[fontIdx % SHARE_FONTS.length];
@@ -168,6 +221,25 @@ export function ShareQuoteSheet({
   const prevFont    = () => setFontIdx(i => (i - 1 + SHARE_FONTS.length) % SHARE_FONTS.length);
   const nextFont    = () => setFontIdx(i => (i + 1) % SHARE_FONTS.length);
 
+  // Reset font size whenever text or font changes so scaling re-runs from max
+  useEffect(() => {
+    fontSizeRef.current = MAX_FONT_SIZE;
+    setQuoteFontSize(MAX_FONT_SIZE);
+  }, [displayText, fontIdx]);
+
+  // Iteratively shrink font until text fits the quote area
+  const handleTextLayout = useCallback((e: { nativeEvent: { lines: Array<{ y: number; height: number }> } }) => {
+    const lines = e.nativeEvent.lines;
+    if (!lines.length) return;
+    const lastLine = lines[lines.length - 1];
+    const totalHeight = lastLine.y + lastLine.height;
+    if (totalHeight > QUOTE_AREA_HEIGHT && fontSizeRef.current > MIN_FONT_SIZE) {
+      const next = Math.max(MIN_FONT_SIZE, fontSizeRef.current - 1);
+      fontSizeRef.current = next;
+      setQuoteFontSize(next);
+    }
+  }, []);
+
   // Prev/next selector indices
   const prevIdx = ((patternIdx - 1 + 3) % 3) as PatternIndex;
   const nextIdx = ((patternIdx + 1) % 3) as PatternIndex;
@@ -177,7 +249,7 @@ export function ShareQuoteSheet({
     try {
       if (!cardRef.current) return null;
       // @ts-ignore — capture is on the instance
-      const uri: string = await cardRef.current.capture({ format: 'png', quality: 1 });
+      const uri: string = await cardRef.current.capture({ format: 'png', quality: 1, pixelRatio: 4 });
       return uri;
     } catch (e) {
       console.warn('ShareQuoteSheet: capture failed', e);
@@ -191,13 +263,13 @@ export function ShareQuoteSheet({
     try {
       const { status } = await MediaLibrary.requestPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission required', 'Allow access to Photos to save the image.');
+        showPill('Permission required');
         return;
       }
       const uri = await captureCard();
       if (!uri) return;
       await MediaLibrary.saveToLibraryAsync(uri);
-      Alert.alert('Saved!', 'Image saved to your gallery.');
+      showPill('Saved to gallery');
     } finally {
       setCapturing(false);
     }
@@ -211,10 +283,7 @@ export function ShareQuoteSheet({
       const uri = await captureCard();
       if (!uri) return;
       const canShare = await Sharing.isAvailableAsync();
-      if (!canShare) {
-        Alert.alert('Sharing unavailable', 'Cannot share images on this device.');
-        return;
-      }
+      if (!canShare) return;
       await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: 'Share quote' });
     } finally {
       setCapturing(false);
@@ -225,15 +294,19 @@ export function ShareQuoteSheet({
 
   return (
     <Modal transparent visible={visible} animationType="none" onRequestClose={onClose} statusBarTranslucent>
+      <GestureHandlerRootView style={StyleSheet.absoluteFillObject}>
       {/* ── Dimmed backdrop ──────────────────────────────────────────────── */}
       <Animated.View style={[StyleSheet.absoluteFillObject, styles.backdrop, backdropStyle]}>
         <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} />
       </Animated.View>
 
-      {/* ── Sheet ────────────────────────────────────────────────────────── */}
-      <Animated.View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 24) }, sheetStyle]}>
-        {/* Drag handle */}
-        <View style={styles.handle} />
+      {/* ── Sheet (wrapped in pan gesture for drag-to-dismiss) ───────────── */}
+      <GestureDetector gesture={panGesture}>
+        <Animated.View style={[styles.sheet, { paddingBottom: Math.max(insets.bottom, 24) }, sheetStyle]}>
+          {/* Drag handle */}
+          <View style={styles.handleWrap}>
+            <Image source={DRAG_BAR_ICON} style={styles.handleImg} contentFit="contain" />
+          </View>
 
         {/* ── Carousel row: prev selector + card + next selector ─────── */}
         <View style={styles.carouselRow}>
@@ -250,7 +323,7 @@ export function ShareQuoteSheet({
           <ViewShot
             ref={cardRef}
             options={{ format: 'png', quality: 1 }}
-            style={[styles.card, { width: CARD_WIDTH, height: CARD_HEIGHT }]}
+            style={styles.card}
           >
             {/* Pattern fills card entirely */}
             <Image
@@ -259,15 +332,18 @@ export function ShareQuoteSheet({
               contentFit="cover"
             />
 
-            {/* Quote text — centered, vertically padded from top (48dp) and bottom (attribution area ~70dp) */}
+            {/* Quote text — vertically centered between top padding and attribution */}
             <View style={styles.quoteArea}>
               <Text
-                style={[styles.quoteText, fontsLoaded ? { fontFamily: currentFont.fontFamily } : undefined]}
-                adjustsFontSizeToFit
-                minimumFontScale={0.5}
-                numberOfLines={10}
+                style={[
+                  styles.quoteText,
+                  { fontSize: quoteFontSize, lineHeight: quoteFontSize * 1.4 },
+                  isFontReady(currentFont.fontFamily) ? { fontFamily: currentFont.fontFamily } : undefined,
+                  currentFont.fontFamily === 'ShareFont-Manrope' ? { fontWeight: '700' } : undefined,
+                ]}
+                onTextLayout={handleTextLayout}
               >
-                {selectedText || bookTitle}
+                {displayText}
               </Text>
             </View>
 
@@ -323,14 +399,17 @@ export function ShareQuoteSheet({
               contentFit="contain"
             />
           </Pressable>
-          <Text
-            style={[
-              styles.fontPreview,
-              fontsLoaded ? { fontFamily: currentFont.fontFamily } : undefined,
-            ]}
-          >
-            Abc
-          </Text>
+          <View style={styles.fontPreviewWrap}>
+            <Text
+              style={[
+                styles.fontPreview,
+                isFontReady(currentFont.fontFamily) ? { fontFamily: currentFont.fontFamily } : undefined,
+                currentFont.fontFamily === 'ShareFont-Manrope' ? { fontWeight: '700' } : undefined,
+              ]}
+            >
+              Abc
+            </Text>
+          </View>
           <Pressable onPress={nextFont} hitSlop={12} style={styles.fontArrow}>
             <Image
               source={require('@/assets/share/arrow-right.svg')}
@@ -340,25 +419,37 @@ export function ShareQuoteSheet({
           </Pressable>
         </View>
 
-        {/* ── Share destinations ───────────────────────────────────────── */}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.shareRow}
-        >
-          {SHARE_DESTINATIONS.map((dest) => (
-            <Pressable
-              key={dest.id}
-              style={styles.shareBtn}
-              onPress={() => handleShare(dest)}
-              disabled={capturing}
-            >
-              <Image source={dest.icon} style={styles.shareIcon} contentFit="contain" />
-              <Text style={styles.shareLabel}>{dest.label}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-      </Animated.View>
+        {/* ── Share destinations + pill overlay ───────────────────────── */}
+        <View style={styles.shareRowWrap}>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.shareRow}
+          >
+            {SHARE_DESTINATIONS.map((dest) => (
+              <Pressable
+                key={dest.id}
+                style={styles.shareBtn}
+                onPress={() => handleShare(dest)}
+                disabled={capturing}
+              >
+                <Image source={dest.icon} style={styles.shareIcon} contentFit="cover" />
+                <Text style={styles.shareLabel}>{dest.label}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+          {/* Pill feedback — overlays the share row */}
+          {pillVisible && (
+            <Animated.View style={[styles.pillOverlay, pillStyle]} pointerEvents="none">
+              <View style={styles.pill}>
+                <Text style={styles.pillText}>{pillText}</Text>
+              </View>
+            </Animated.View>
+          )}
+        </View>
+        </Animated.View>
+      </GestureDetector>
+      </GestureHandlerRootView>
     </Modal>
   );
 }
@@ -375,51 +466,52 @@ const styles = StyleSheet.create({
   // Sheet
   sheet: {
     position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
+    bottom: 24,
+    left: 12,
+    right: 12,
     backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderRadius: 24,
     paddingTop: 12,
     paddingHorizontal: SHEET_PAD_H,
-    gap: 24, // 24dp between every section
+    gap: 32,
     zIndex: 1,
   },
 
   // Drag handle
-  handle: {
+  handleWrap: {
     alignSelf: 'center',
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#D0D0D0',
-    marginBottom: 0, // gap: 24 on sheet handles spacing
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  handleImg: {
+    width: 64,
+    height: 12,
   },
 
   // Carousel
   carouselRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    // No horizontal padding here — card fills SHEET_PAD_H zone,
-    // selectors visually overflow to create carousel feel
+    justifyContent: 'center',
   },
   selectorWrap: {
     width: SELECTOR_W,
     height: SELECTOR_H,
     borderRadius: 6,
     overflow: 'hidden',
-    opacity: 0.6,
+    opacity: 1.0,
   },
   selectorImg: {
     width: SELECTOR_W,
     height: SELECTOR_H,
   },
   card: {
-    flex: 1, // fills space between the two selectors
-    borderRadius: 12,
+    width: CARD_WIDTH,
+    height: CARD_HEIGHT,
+    borderRadius: 4,
     overflow: 'hidden',
-    marginHorizontal: 8, // small gap between card and selectors
+    marginHorizontal: 16,
   },
   quoteArea: {
     position: 'absolute',
@@ -432,11 +524,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   quoteText: {
+    width: '100%',
     color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '700',
     textAlign: 'center',
-    lineHeight: 22,
+    // fontSize, lineHeight and fontWeight are set inline (dynamic per font)
   },
   attribution: {
     position: 'absolute',
@@ -445,30 +536,31 @@ const styles = StyleSheet.create({
     right: 12,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 8,
   },
   coverThumb: {
-    width: 32,
-    height: 48,
-    borderRadius: 3,
+    width: 14,
+    height: 18,
+    borderRadius: 2,
     backgroundColor: 'rgba(255,255,255,0.2)',
   },
   coverPlaceholder: {
     backgroundColor: 'rgba(255,255,255,0.15)',
   },
   attributionText: {
-    flex: 1,
   },
   bookTitle: {
     color: '#FFFFFF',
-    fontSize: 10,
+    fontFamily: 'ShareFont-Manrope',
+    fontSize: 6,
     fontWeight: '700',
-    lineHeight: 14,
   },
   bookAuthor: {
-    color: 'rgba(255,255,255,0.75)',
-    fontSize: 10,
-    lineHeight: 14,
+    color: '#ffffff',
+    fontFamily: 'ShareFont-Manrope',
+    fontSize: 6,
+    fontWeight: '500',
   },
 
   // Color picker
@@ -514,14 +606,25 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
   },
+  fontPreviewWrap: {
+    alignItems: 'center',
+    minWidth: 100,
+  },
   fontPreview: {
-    fontSize: 48,
-    fontWeight: '700',
+    fontSize: 36,
     color: '#111111',
-    lineHeight: 58,
+    lineHeight: 44,
+  },
+  fontName: {
+    fontSize: 11,
+    color: '#888888',
+    marginTop: 2,
   },
 
   // Share row
+  shareRowWrap: {
+    position: 'relative',
+  },
   shareRow: {
     paddingHorizontal: 0,
     gap: 16,
@@ -541,5 +644,23 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#333333',
     textAlign: 'center',
+  },
+
+  // Pill feedback
+  pillOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  pill: {
+    backgroundColor: '#F0F0F0',
+    borderRadius: 100,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  pillText: {
+    fontSize: 14,
+    color: '#111111',
+    fontWeight: '500',
   },
 });

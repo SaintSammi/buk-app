@@ -131,7 +131,7 @@ export default function EpubReaderScreen() {
     if (resolvedUri) {
       extractEpubToc(resolvedUri).then((res) => {
         if (res) setToc(res);
-      });
+      }).catch(() => {});
       extractEpubCover(resolvedUri).then((uri) => {
         if (uri) setCoverUri(uri);
       }).catch(() => {});
